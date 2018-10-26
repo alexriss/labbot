@@ -6,7 +6,7 @@
 # which can happen in case of a power outage.
 
 # Furthermore, the bot can respond to request and send the actual pressure and temperature status.
-# # Also it can generate graphs with specific date ranges.
+# Also it can generate graphs with specific date ranges.
 # A user notification system is available.
 # Type "h" or "help" for more information about the bot.
 #
@@ -15,7 +15,6 @@
 # TODO:
 #   - better comments and documentation
 #   - unit test
-#   - error codes for warnings (negative numbers)
 #   - put everything onto github with screenshot.gif and example log-file
 #   - bakeout control and sending of webcam photos
 #   - inlinehandlers
@@ -59,6 +58,9 @@ class LabBot:
         self.LOGGING_last_write = {}   # dictionary of errors, keys are the error strings and values contain timestamp of last written log
         self.USER_config = {}          # dictionary of user id with config data
 
+        self.logging_filename = ""
+        self.check_logging_file(force=True)
+
         # these class variables will be written and loaded from the configuration file
         self.config_vars = ['ERRORS_checks', 'USER_config']
         self.save_config = False  # whether to save the config
@@ -71,8 +73,6 @@ class LabBot:
             if user not in self.USER_config:
                 self.USER_config[user] = {'quiet_times': True}
 
-        self.check_logging_file(force=True)
-
         self.updater = Updater(token=cfg.BOT_TOKEN)
         self.dispatcher = self.updater.dispatcher
         self.bot = self.updater.bot
@@ -84,7 +84,8 @@ class LabBot:
             telegram.InlineKeyboardButton("graph", callback_data='/graph'),
             telegram.InlineKeyboardButton("notify", callback_data='/n'),
             # telegram.InlineKeyboardButton("bakeout", callback_data='/bakeout'),
-            telegram.InlineKeyboardButton("photo", callback_data='/photo')
+            #telegram.InlineKeyboardButton("photo", callback_data='/photo')
+            telegram.InlineKeyboardButton("help", callback_data='/help')
         ]
         self.reply_markup = telegram.InlineKeyboardMarkup(self.build_menu(button_list, n_cols=4))
 
@@ -220,6 +221,8 @@ class LabBot:
             self.status_bakeout(bot, update)
         elif querydata == '/photo':
             self.status_photo(bot, update)
+        elif querydata == '/help':
+            self.help_message(bot, update)
         elif querydata == '/n':
             self.user_notifications_manage(bot, update, args=['list'])
 
@@ -762,10 +765,11 @@ class LabBot:
         datas = []
         for i in range(first_day, last_day + 1):
             log_file = (datetime.datetime.now() + datetime.timedelta(days=i)).strftime(cfg.LOG_FILE)
+            dtypes = [object] + [float] * len(self.LOG_labels)  # time and labels
+            usecols = range(len(dtypes))
             try:
                 with open(log_file) as fp:
-                    datas.append(np.genfromtxt(itertools.islice(fp, 0, None, n), delimiter=cfg.LOG_FILE_DELIMITER, dtype=[
-                                 object] + [float] * len(self.LOG_labels), names=None, skip_header=1, comments='#', converters={0: str2date}))
+                    datas.append(np.genfromtxt(itertools.islice(fp, 0, None, n), delimiter=cfg.LOG_FILE_DELIMITER, dtype=dtypes, usecols=usecols, names=None, skip_header=1, comments='#', converters={0: str2date}))
             except FileNotFoundError:
                 pass
         if len(datas) > 0:
@@ -788,7 +792,7 @@ class LabBot:
                 log_labels = []
                 for l in firstline.split(cfg.LOG_FILE_DELIMITER):
                     if len(l.strip()) > 0:
-                        log_labels.append(l.strip())
+                        log_labels.append(cfg.LOG_NAMES_REPLACEMENT(l.strip()))
                 fp.seek(-maxLineLength * 22, 2)  # 2 means "from the end of the file"
                 i = -1
                 lines = fp.readlines()
@@ -956,9 +960,9 @@ class LabBot:
     def check_logging_file(self, force=False):
         """checks whether the filehands for logging should be updated"""
         now = datetime.datetime.now()
-        if force or now - self.logging_date > datetime.timedelta(days=1):
+        fname = now.strftime(cfg.LOGGING_FILENAME)
+        if force or fname != self.logging_filename:
             logging.basicConfig(level=logging.INFO)
-            fname = now.strftime(cfg.LOGGING_FILENAME)  # "%Y-%m-%d_%H-%M-%S"
             os.makedirs(os.path.dirname(fname), exist_ok=True)  # create subdirectory if it doesnt exist
             fileh = logging.FileHandler(fname, 'a')
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -968,7 +972,7 @@ class LabBot:
                 log.removeHandler(hdlr)
             log.addHandler(fileh)
             fileh.setLevel(logging.getLevelName('INFO'))
-            self.logging_date = now
+            self.logging_filename = fname
 
     def config_save(self):
         """saves config"""

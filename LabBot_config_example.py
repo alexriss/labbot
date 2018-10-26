@@ -29,6 +29,9 @@ DATE_FMT_BOT_SHORT = (
 # for longer commands "statusadasf" will be recognized
 MESSAGE_COMMANDS_STRICT_MAXLENGTH = 3
 
+# replace names from the file using these callable
+LOG_NAMES_REPLACEMENT = lambda x: x.replace('[', ' [')
+
 # indices that are used to understand notification queries
 INDICES_LABELS = {
     0: ["afm", "pafm", "afmpressure", "afmp", "pressureafm"],
@@ -108,6 +111,10 @@ ERROR_NONPOSITIVE_VALUES = {
 }
 ERROR_NONPOSITIVE_DEFAULT = "ERROR_negative"
 
+# configuration will be saved to this file and loaded on startup
+USER_CONFIG_FILE = ("config_state.pickle")
+
+
 # no error messages during office hours
 QUIET_TIMES = True
 QUIET_TIMES_WEEKDAYS = [0, 1, 2, 3, 4]  # Mon to Fri
@@ -115,7 +122,7 @@ QUIET_TIMES_HOURS_START = 8.0
 QUIET_TIMES_HOURS_END = 18.0
 
 LOGGING_FILENAME = (
-    "logs/log_%Y-%m-%d.log"
+    "logs/log_%Y-%m.log"
 )  # filename for logging of app information, errors and warnings
 LOGGING_ERROR_EVERY_MINUTES = 15  # write warnings to log every n minutes
 
@@ -217,9 +224,22 @@ TEXTS_UNKNOWN_COMMAND = [
     "I don't get it.",
     u"\U0001F937",
     " ¯\_(ツ)_/¯",
+    "Don't mistake my generosity for generosity.",
+    "If you've got something to say, you should say it. Otherwise, it's just gonna tear you up inside.",
+    "Well, when it comes down to me against a situation, I don't like the situation to win.",
+    "I learned something a long time ago: never laugh at what you don't know.",
+    "If you don't have the right equipment for the job, you just have to make it yourself.",
+    "Well, sometimes things are hidden under the surface... You just gotta know how to bring 'em out.",
+    "Only a fool is sure of anything, a wise man keeps on guessing.",
 ]
 TEXTS_START = [
     "Greetings, Professor Falken.",
+    "Hello, friend. Hello, friend. That's lame. Maybe I should give you a name. But that’s a slippery slope. You’re only in my head. We have to remember that."
+    "No rest for the wicked.",
+    "Every day we change the world. But to change the world in a way that means anything that takes more time than most people have. It never happens all at once. It's slow. It's methodical. It's exhausting.",
+    "A man once said: 'When you make a friend, you take on a responsibility'.",
+    "That's the way the world gets better... one person at a time.",
+    "I made my move. You make yours.",
     u"\U0001F609",
     u"\U0001F91D",
     u"\U0001F596",
@@ -230,8 +250,12 @@ TEXTS_ERROR = [
     "Something went wrong.",
     u"\U0001F4A9",
     "A strange game. The only winning move is not to play.",
+    "I wanted to save the world.",
+    "Unfortunately, we're all human. Except me, of course.",
+    "A bug is never just a mistake. It represents something bigger. An error of thinking. That makes you who you are.",
+    "There always seems to be a way to fix things.",
+    "I've found from past experiences that the tighter you plan, the more likely you are to run into something unpredictable.",
+    # "It's not that I am out of moves, it's that you’re not worth one.",
+    "Any problem can be solved with a little ingenuity.",
+    # "I think there's a fault in my code. These voices won’t leave me alone.",
 ]
-
-USER_CONFIG_FILE = (
-    "config_state.pickle"
-)  # configuration will be saved to this file and reloaded . restart
