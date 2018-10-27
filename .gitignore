@@ -47,4 +47,5 @@ LabBot_config.py
 !.gitignore
 !LabBot.py
 !LabBot_config_example.py
-!screenshot.gif
+!screenshots
+!readme.md
