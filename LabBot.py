@@ -701,6 +701,9 @@ class LabBot:
             except:
                 pass
 
+        if from_date > to_date:
+            from_date, to_date = to_date, from_date
+
         # we have daily logs, and do not need to read every one
         data = self.read_log_every_nth(from_date=from_date, to_date=to_date)
         if not data.shape[0]:
@@ -724,6 +727,8 @@ class LabBot:
         for i, label in enumerate(self.LOG_labels):
             # filter non-positive values
             c = self.LOG_labels_orig[i]
+            if c not in data:
+                continue
             if i in cfg.GRAPH_IGNORE_NONPOSITIVE_INDICES:
                 data[c][data[c] < 0] = np.nan
             logy = False
@@ -772,12 +777,12 @@ class LabBot:
             try:
                 # we can use skiprows here, but I found that it doesn't really speed up things; so we do the rolling mean in the next line
                 df = pd.read_csv(log_file,
-                    sep=cfg.LOG_FILE_DELIMITER,
-                    comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
-                    parse_dates=True,
-                    date_parser=self.str2date,
-                    index_col=0,
-                    dtype=np.float)
+                                 sep=cfg.LOG_FILE_DELIMITER,
+                                 comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                                 parse_dates=True,
+                                 date_parser=self.str2date,
+                                 index_col=0,
+                                 dtype=np.float)
                 datas.append(df.rolling(n).mean().iloc[::n, :])
             except FileNotFoundError:
                 pass
@@ -800,20 +805,20 @@ class LabBot:
             with open(self.log_file, "rb") as fp:
                 firstline = fp.readline().decode()
                 log_labels_orig = pd.read_csv(io.StringIO(firstline),
-                    nrows=0,
-                    sep=cfg.LOG_FILE_DELIMITER).columns.tolist()[1:]  # first index is date-time
+                                              nrows=0,
+                                              sep=cfg.LOG_FILE_DELIMITER).columns.tolist()[1:]  # first index is date-time
                 log_labels = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels_orig))
                 fp.seek(-maxLineLength * 22, 2)  # 2 means "from the end of the file"
 
                 df = pd.read_csv(fp,
-                    sep=cfg.LOG_FILE_DELIMITER,
-                    comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
-                    parse_dates=True,
-                    date_parser=self.str2date,
-                    header=None,
-                    skiprows=1,
-                    index_col=0,
-                    dtype=np.float)
+                                 sep=cfg.LOG_FILE_DELIMITER,
+                                 comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                                 parse_dates=True,
+                                 date_parser=self.str2date,
+                                 header=None,
+                                 skiprows=1,
+                                 index_col=0,
+                                 dtype=np.float)
                 if df.shape[0] > 0:
                     if df.shape[1] == len(log_labels):
                         self.LOG_labels = log_labels

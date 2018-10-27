@@ -1,5 +1,5 @@
 # Numerical user ids of people who can interact with the bot
-LIST_OF_USERS = [007, 008]
+LIST_OF_USERS = ['007', '008']
 
 # Telegram bot informaiton, talk to the Botfather to get this.
 BOT_ID = "<id>"
