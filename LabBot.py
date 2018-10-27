@@ -727,6 +727,7 @@ class LabBot:
         for i, label in enumerate(self.LOG_labels):
             # filter non-positive values
             c = self.LOG_labels_orig[i]
+            axs[i].set_ylabel(label)
             if c not in data:
                 continue
             if i in cfg.GRAPH_IGNORE_NONPOSITIVE_INDICES:
@@ -734,9 +735,7 @@ class LabBot:
             logy = False
             if i in cfg.GRAPH_LOG_INDICES:
                 logy = True
-
             data.plot(y=c, ax=axs[i], color=colors[i % len(colors)], ls='-', lw=2, ms=0, legend=None, logy=logy)
-            axs[i].set_ylabel(label)
         # axs[-1].set_xlabel('date')
         fig.autofmt_xdate()
         plt.tight_layout()
