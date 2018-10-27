@@ -7,30 +7,32 @@ BOT_TOKEN = "<token>"
 
 # Log file, column delimiter and date format (first column is the date-time information)
 LOG_FILE = "/network/logs/log-%Y-%m-%d.log"
+LOG_FILE_EVERY_DAYS = 1  # the log filename is changed every n days, 1 for daily logs
 LOG_FILE_DELIMITER = "\t"
+LOG_FILE_DELIMITER_COMMENT_SYMBOL = "#"
 DATE_FMT_LOG = "%Y-%m-%d_%H:%M:%S"  # format of first column (date-time) in the log
 
 READ_LOG_EVERY_SECONDS = 60  # read log and do sanity checks every n seconds
-WARNING_NOLOG_MINUTES = (
-    5
-)  # if there are no logs for this amount of minutes, send warning
-WARNING_SEND_EVERY_MINUTES = (
-    30
-)  # send warning every n number of minutes (if it still persists)
+WARNING_NOLOG_MINUTES = (5)   # if there are no logs for this amount of minutes, send warning
+WARNING_SEND_EVERY_MINUTES = (30)  # send warning every n number of minutes (if it still persists)
 
+FLOAT_PRECISION_BOT = 4  # significant digits of floats for display
 DATE_FMT_BOT = "%Y-%m-%d %H:%M:%S"
 DATE_FMT_BOT_SHORT_HOURS = 6  # use short date format if less than n hours have elapsed
-DATE_FMT_BOT_SHORT = (
-    "%H:%M:%S"
-)  # use short date format if less than DATE_FMT_BOT_SHORT_HOURS hours have elapsed
+DATE_FMT_BOT_SHORT = ("%H:%M:%S")  # use short date format if less than DATE_FMT_BOT_SHORT_HOURS hours have elapsed
 
 # if a typed command is below this length, if will be handled as a strict command
 # this means that "n" will work, but not "nasdf"
 # for longer commands "statusadasf" will be recognized
 MESSAGE_COMMANDS_STRICT_MAXLENGTH = 3
 
+
 # replace names from the file using these callable
-LOG_NAMES_REPLACEMENT = lambda x: x.replace('[', ' [')
+def replace(x):
+    return x.replace('TAFM', 'T_AFM').replace('TCRY', 'T_Cryo').replace('[', ' [')
+
+
+LOG_NAMES_REPLACEMENT = replace
 
 # indices that are used to understand notification queries
 INDICES_LABELS = {
@@ -68,6 +70,16 @@ INDICES_LABELS = {
         "afmtemp",
         "tempafm",
     ],
+    4: [
+        "tempcryo",
+        "tc",
+        "tcryo",
+        "cryotemperature",
+        "cryot",
+        "temperaturecryo",
+        "cryotemp",
+        "cryo",
+    ],
 }
 
 # error_name, index in LOG_values, and limits (first value is the normal warning value, second is for quiet hours)
@@ -86,10 +98,11 @@ ERROR_LIMITS_MAX = {
     },  # maximum ROUGHING pressure for warning (in mbar)
     # maximum temperature for the AFM temperature diode reading
     "ERROR_temperature_afm": {"index": 3, "limits": [18.0, 20.0]},
+    "ERROR_temperature_cryo": {"index": 4, "limits": [5.0, 6.0]},
 }
 
 # nonpositive values can encode error codes
-ERROR_NONPOSITIVE_INDICES = [0, 1, 2]
+ERROR_NONPOSITIVE_INDICES = [0, 1, 2, 3, 4]
 
 # specific error codes
 ERROR_NONPOSITIVE_VALUES = {
@@ -108,6 +121,8 @@ ERROR_NONPOSITIVE_VALUES = {
     "ERROR_negative_pressure_roughing_off": {"index": 2, "value": -3, "value_replace": "off"},
     "ERROR_negative_pressure_roughing_notfound": {"index": 2, "value": -4, "value_replace": "not found"},
     "ERROR_negative_pressure_roughing_iderror": {"index": 2, "value": -5, "value_replace": "id error"},
+    "ERROR_negative_temperature_afm_notfound": {"index": 3, "value": -4, "value_replace": "not found"},
+    "ERROR_negative_temperature_cryo_notfound": {"index": 4, "value": -4, "value_replace": "not found"},
 }
 ERROR_NONPOSITIVE_DEFAULT = "ERROR_negative"
 
@@ -135,12 +150,8 @@ GRAPH_EVERY_NTH_LINE_MAX = (
 )  # maximum number for GRAPH_EVERY_NTH_LINE after auto-adjustment
 GRAPH_DAYS_MAX = 31  # maximum number of days to plot
 GRAPH_LOG_INDICES = [0, 1]  # use logarothmic y-scale for these indices
-GRAPH_IGNORE_NONPOSITIVE_INDICES = [
-    0,
-    1,
-    2,
-    3,
-]  # ignore negative values for these indices (errors can be encoded as negative values)
+# ignore negative values for these indices (errors can be encoded as negative values)
+GRAPH_IGNORE_NONPOSITIVE_INDICES = [0, 1, 2, 3, 4, 5]
 
 WARNING_MESSAGES = {
     "ERROR_log_read": u"\u26A0" + " *WARNING: *\nNo log available since ",
@@ -148,6 +159,7 @@ WARNING_MESSAGES = {
     "ERROR_pressure_prep": u"\u26A0" + " *WARNING: *\nPrep pressure is high.",
     "ERROR_pressure_roughing": u"\u26A0" + " *WARNING: *\nRoughing pressure is high.",
     "ERROR_temperature_afm": u"\u26A0" + " *WARNING: *\nAFM temperature is high.",
+    "ERROR_temperature_cryo": u"\u26A0" + " *WARNING: *\nCryo temperature is high.",
     "ERROR_negative_pressure_afm_overrange": u"\u26A0" + " *WARNING: *\nAFM pressure overrange.",
     "ERROR_negative_pressure_afm_error": u"\u26A0" + " *WARNING: *\nAFM pressure sensor error.",
     "ERROR_negative_pressure_afm_off": u"\u26A0" + " *WARNING: *\nAFM pressure sensor off.",
@@ -163,6 +175,8 @@ WARNING_MESSAGES = {
     "ERROR_negative_pressure_roughing_off": u"\u26A0" + " *WARNING: *\nRoughing pressure sensor off.",
     "ERROR_negative_pressure_roughing_notfound": u"\u26A0" + " *WARNING: *\nRoughing pressure sensor not found.",
     "ERROR_negative_pressure_roughing_iderror": u"\u26A0" + " *WARNING: *\nRoughing pressure sensor id error.",
+    "ERROR_negative_temperature_afm_notfound": u"\u26A0" + " *WARNING: *\nAFM temperature not detected.",
+    "ERROR_negative_temperature_cryo_notfound": u"\u26A0" + " *WARNING: *\nCryo temperature not detected.",
     "ERROR_negative": u"\u26A0" + " *WARNING: *\nNegative sensor values observed ({}).",
 }
 
@@ -172,6 +186,7 @@ WARNING_NAMES = {
     "ERROR_pressure_prep": "Prep-pressure",
     "ERROR_pressure_roughing": "Roughing-pressure",
     "ERROR_temperature_afm": "AFM-temperature",
+    "ERROR_temperature_cryo": "Cryo-temperature",
     "ERROR_negative_pressure_afm_overrange": "AFM-pressure-overrange",
     "ERROR_negative_pressure_afm_error": "AFM-pressure-sensor-error",
     "ERROR_negative_pressure_afm_off": "AFM-pressure-sensor-off",
@@ -187,6 +202,8 @@ WARNING_NAMES = {
     "ERROR_negative_pressure_roughing_off": "Roughing-pressure-sensor-off",
     "ERROR_negative_pressure_roughing_notfound": "Roughing-pressure-sensor-notfound",
     "ERROR_negative_pressure_roughing_iderror": "Roughing-pressure-sensor-iderror",
+    "ERROR_negative_temperature_afm_notfound": "AFM-temperature-notfound",
+    "ERROR_negative_temperature_cryo_notfound": "Cryo-temperature-notfound",
     "ERROR_negative": "Negative-values-error",
 }
 
@@ -196,6 +213,7 @@ WARNING_OFF_MESSAGES = {
     "ERROR_pressure_prep": u"\u2713" + " *DE-WARNING: *\nPrep pressure seems ok again.",
     "ERROR_pressure_roughing": u"\u2713" + " *DE-WARNING: *\nRoughing pressure seems ok again.",
     "ERROR_temperature_afm": u"\u2713" + " *DE-WARNING: *\nAFM temperature seems ok again.",
+    "ERROR_temperature_cryo": u"\u2713" + " *DE-WARNING: *\nCryo temperature seems ok again.",
     "ERROR_negative_pressure_afm_overrange": u"\u2713" + " *DE-WARNING: *\nAFM pressure overrange ceased.",
     "ERROR_negative_pressure_afm_error": u"\u2713" + " *DE-WARNING: *\nAFM pressure sensor error ceased.",
     "ERROR_negative_pressure_afm_off": u"\u2713" + " *DE-WARNING: *\nAFM pressure sensor on again.",
@@ -211,6 +229,8 @@ WARNING_OFF_MESSAGES = {
     "ERROR_negative_pressure_roughing_off": u"\u2713" + " *DE-WARNING: *\nRoughing pressure sensor on again.",
     "ERROR_negative_pressure_roughing_notfound": u"\u2713" + " *DE-WARNING: *\nRoughing pressure sensor found again.",
     "ERROR_negative_pressure_roughing_iderror": u"\u2713" + " *DE-WARNING: *\nRoughing pressure sensor id error ceased.",
+    "ERROR_negative_temperature_afm_notfound": u"\u2713" + " *DE-WARNING: *\nAFM temperature can be detected again.",
+    "ERROR_negative_temperature_cryo_notfound": u"\u2713" + " *DE-WARNING: *\nCryo temperature can be detected again.",
     "ERROR_negative": u"\u2713" + " *DE-WARNING: *\nSensor values are positive again.",
 }
 
@@ -223,10 +243,10 @@ TEXTS_UNKNOWN_COMMAND = [
     u"\U0001F595",
     "I don't get it.",
     u"\U0001F937",
-    " ¯\_(ツ)_/¯",
+    "¯\\_(ツ)_/¯",
     "Don't mistake my generosity for generosity.",
     "If you've got something to say, you should say it. Otherwise, it's just gonna tear you up inside.",
-    "Well, when it comes down to me against a situation, I don't like the situation to win.",
+    # "Well, when it comes down to me against a situation, I don't like the situation to win.",
     "I learned something a long time ago: never laugh at what you don't know.",
     "If you don't have the right equipment for the job, you just have to make it yourself.",
     "Well, sometimes things are hidden under the surface... You just gotta know how to bring 'em out.",

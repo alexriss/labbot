@@ -13,9 +13,10 @@
 # Alex Riss, 2018, GPL
 #
 # TODO:
+#   - move from index-based notation in config and notifications to label based notation (i.e. column names)
 #   - better comments and documentation
-#   - unit test
-#   - put everything onto github with screenshot.gif and example log-file
+#   - unit tests
+#   - github: screenshot.gif and example log-file
 #   - bakeout control and sending of webcam photos
 #   - inlinehandlers
 #   - friendly and hostile modes for random text messages
@@ -27,12 +28,11 @@ import copy
 import datetime
 import datemath
 import io
-import itertools
 import logging
 import matplotlib.pyplot as plt
-import matplotlib
 import numpy as np
 import os
+import pandas as pd
 import pickle
 import random
 import re
@@ -48,11 +48,12 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.11
+        self.__version__ = 0.12
 
         self.LOG_last_checked = None   # date and time of when the log was last checked
         self.LOG_data = []             # data of one log line
         self.LOG_labels = []           # labels for log data
+        self.LOG_labels_orig = []      # labels for log data without string replacements
         # list of users with dictionary of errors, keys are the error strings and values contain extra error information
         self.ERRORS_checks = {}
         self.LOGGING_last_write = {}   # dictionary of errors, keys are the error strings and values contain timestamp of last written log
@@ -84,7 +85,7 @@ class LabBot:
             telegram.InlineKeyboardButton("graph", callback_data='/graph'),
             telegram.InlineKeyboardButton("notify", callback_data='/n'),
             # telegram.InlineKeyboardButton("bakeout", callback_data='/bakeout'),
-            #telegram.InlineKeyboardButton("photo", callback_data='/photo')
+            # telegram.InlineKeyboardButton("photo", callback_data='/photo')
             telegram.InlineKeyboardButton("help", callback_data='/help')
         ]
         self.reply_markup = telegram.InlineKeyboardMarkup(self.build_menu(button_list, n_cols=4))
@@ -187,21 +188,21 @@ class LabBot:
         try:
             raise error
         except telegram.error.Unauthorized:
-            if update.message:
+            if update and update.message:
                 logging.warning('Telegram error: Unauthorized user: {}'.format(update.message.chat_id))
         except telegram.error.BadRequest:
             logging.warning('Telegram error: Bad request.')
-            if update.message:
+            if update and update.message:
                 bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
         except telegram.error.TimedOut:
             logging.warning('Telegram error: Network timeeout.')
-            if update.message:
+            if update and update.message:
                 bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
         except telegram.error.NetworkError:
             logging.warning('Telegram error: Network error.')
-            if update.message:
+            if update and update.message:
                 bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
         except telegram.error.ChatMigrated as e:
@@ -300,10 +301,13 @@ class LabBot:
                 raise ValueError('No chat_id and no update object is provided.')
         return chat_id
 
+    def str2date(self, x):
+        """convert string from log to datetime object"""
+        return datetime.datetime.strptime(x, cfg.DATE_FMT_LOG)
+
     def escape_markdown(self, text):
         """Escape telegram markup symbols."""
-        escape_chars = '\*_`\['
-        return re.sub(r'([{}])'.format(escape_chars), r'\\\1', text)
+        return re.sub(r'([\*_`\[])', r'\\\1', text)
 
     def pick_random(self, elements):
         """returns random element from elements"""
@@ -313,9 +317,9 @@ class LabBot:
         """replaces negative values with error codes"""
         log_data_replaced = log_data[:]
         for i in cfg.ERROR_NONPOSITIVE_INDICES:
-            if log_data[i]<0:
+            if log_data[i] < 0:
                 for keys, e_dict in cfg.ERROR_NONPOSITIVE_VALUES.items():
-                    if e_dict['index']==i and e_dict['value'] == log_data[i]:
+                    if e_dict['index'] == i and e_dict['value'] == log_data[i]:
                         log_data_replaced[i] = e_dict['value_replace']
                         break
         return log_data_replaced
@@ -369,13 +373,13 @@ class LabBot:
                 else:
                     self.ERRORS_checks[error][chat_id]['sendNext'] = now + datetime.timedelta(hours=hours)
                     list_disabled.append(error)
-                    logging.info("Error {} disabled for {:f} hours by {}.".format(error, hours, chat_id))
+                    logging.info("Error {} disabled for {} hours by {}.".format(error, hours, chat_id))
 
         if hours == 0:
             str = 'All warning messages re-enabled.'
         else:
             str_error_names = ", ".join([cfg.WARNING_NAMES[e] for e in list_disabled])
-            str = 'Active warning messages ({}) disabled for {:0.2f} hours.'.format(str_error_names, hours)
+            str = 'Active warning messages ({}) disabled for {} hours.'.format(str_error_names, hours)
         bot.send_message(chat_id=chat_id, text=str, reply_markup=self.reply_markup)
 
     @restricted
@@ -588,14 +592,17 @@ class LabBot:
     @send_action(ChatAction.TYPING)
     def status_pressure(self, bot, update, args=[], chat_id=0, error_str=""):
         str = error_str
-        if datetime.datetime.now() - self.LOG_last_checked < datetime.timedelta(hours=cfg.DATE_FMT_BOT_SHORT_HOURS):
-            str += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT_SHORT) + "*"
-        else:
-            str += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + "*"
+        if self.LOG_last_checked:
+            if datetime.datetime.now() - self.LOG_last_checked < datetime.timedelta(hours=cfg.DATE_FMT_BOT_SHORT_HOURS):
+                str += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT_SHORT) + "*"
+            else:
+                str += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + "*"
         if self.quiet_hours():
             str += ' _(quiet hours)_'
         str += "\n"
-        str += "\n".join(["*{}*: {}".format(label, data) for label, data in zip(self.LOG_labels, self.replace_nonnegative(self.LOG_data))])
+        str += "\n".join(["*{}*: {:.{prec}g}".format(
+            label, data, prec=cfg.FLOAT_PRECISION_BOT) for label, data in zip(self.LOG_labels, self.replace_nonnegative(self.LOG_data))]
+        )
 
         chat_id = self.get_chat_id(update, chat_id)
 
@@ -619,84 +626,6 @@ class LabBot:
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('Photo (not implemented) sent to {}.'.format(chat_id))
 
-    @restricted
-    @send_action(ChatAction.UPLOAD_PHOTO)
-    def status_graph(self, bot, update, args=[], chat_id=0, error_str=""):
-        chat_id = self.get_chat_id(update, chat_id)
-        bio = io.BytesIO()
-        bio.name = 'AFM_status_graph.png'
-        fig, axs = plt.subplots(len(self.LOG_labels), 1, sharex=True, figsize=(8, 8))
-
-        # default values
-        from_date = datetime.datetime.now() - datetime.timedelta(days=cfg.GRAPH_DEFAULT_DAYS)
-        to_date = datetime.datetime.now() + datetime.timedelta(days=1)
-
-        # on cell phones - and + often add spaces afterwards
-        args = " ".join(args).replace('- ', '-').replace('+ ', '+').split()
-
-        # parse args
-        if len(args) >= 1:
-            try:
-                # dm gives UTC timezone, so first we convert to local timezon and then remove the timezon info (so we can compare with the logged entries)
-                from_date = datemath.dm(args[0], type='datetime').astimezone().replace(tzinfo=None)
-            except:
-                pass
-        if len(args) >= 2:
-            try:
-                to_date = datemath.dm(args[1], type='datetime').astimezone().replace(tzinfo=None)
-            except:
-                pass
-
-        # we have daily logs, and do not need to read every one
-        now = datetime.datetime.now()
-        diff_seconds = np.abs((to_date - from_date).total_seconds())
-        day_seconds = datetime.timedelta(days=1).total_seconds()
-        n = self.read_log_every_nth_auto_density(diff_seconds / day_seconds)  # get fraction of days
-        data = self.read_log_every_nth(n=n, first_day=(from_date - now).days, last_day=(to_date - now).days + 1)
-        if data is None:
-            bot.send_message(chat_id=chat_id, text='Cannot get the data for the graph.', reply_markup=self.reply_markup)
-            logging.info('Graph cannot be sent to {}: insufficient data.'.format(chat_id))
-            return False
-
-        name_time = data.dtype.names[0]
-        # filter date=None (in case date conversion went wrong)
-        data = data[data[name_time] != np.array(None)]
-        # filter date range
-        idx = (data[name_time] > from_date) & (data[name_time] <= to_date)
-
-        if not np.count_nonzero(idx) > 0:
-            d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
-            d2 = to_date.strftime("%Y-%m-%d %H:%M:%S")
-            bot.send_message(chat_id=chat_id, text='No data available between {} and {}.'.format(
-                d1, d2), reply_markup=self.reply_markup)
-            logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
-            return False
-
-        dates = matplotlib.dates.date2num(data[name_time])
-        colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0']
-        for i, label in enumerate(self.LOG_labels):
-            name = data.dtype.names[i + 1]
-            data_x = dates[idx]
-            data_y = data[name][idx]
-            # filter non-positive values
-            if i in cfg.GRAPH_IGNORE_NONPOSITIVE_INDICES:
-                idx2 = data_y <= 0
-            data_x[idx2] = np.nan
-            data_y[idx2] = np.nan
-
-            axs[i].plot_date(data_x, data_y, color=colors[i % len(colors)], ls='-', lw=2, ms=0)
-            axs[i].set_ylabel(label)
-            if i in cfg.GRAPH_LOG_INDICES:
-                axs[i].set_yscale('log')
-                # axs[i].set_ylim((1e-11, axs[i].get_ylim()[1]))
-        # axs[-1].set_xlabel('date')
-        fig.autofmt_xdate()
-        plt.tight_layout()
-        plt.savefig(bio, format='png', dpi=100)
-        bio.seek(0)
-        bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
-        logging.info('Graph sent to {}.'.format(chat_id))
-
     def status_error(self, bot):
         now = datetime.datetime.now()
         for chat_id in cfg.LIST_OF_USERS:
@@ -709,7 +638,10 @@ class LabBot:
                         continue
                 str = cfg.WARNING_MESSAGES[error]
                 if error == 'ERROR_log_read':
-                    str += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
+                    if self.LOG_last_checked:
+                        str += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
+                    else:
+                        str += 'unknown.'
                 bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
                 bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN)
                 self.ERRORS_checks[error][chat_id]['sendNext'] = now + \
@@ -740,6 +672,75 @@ class LabBot:
 
             self.error_remove(error)
 
+    @restricted
+    @send_action(ChatAction.UPLOAD_PHOTO)
+    def status_graph(self, bot, update, args=[], chat_id=0, error_str=""):
+        chat_id = self.get_chat_id(update, chat_id)
+
+        now = datetime.datetime.now()
+        bio = io.BytesIO()
+        bio.name = 'AFM_status_graph.png'
+
+        # default values
+        from_date = now - datetime.timedelta(days=cfg.GRAPH_DEFAULT_DAYS)
+        to_date = now + datetime.timedelta(days=1)
+
+        # on cell phones - and + often add spaces afterwards
+        args = " ".join(args).replace('- ', '-').replace('+ ', '+').split()
+
+        # parse args
+        if len(args) >= 1:
+            try:
+                # dm gives UTC timezone, so first we convert to local timezon and then remove the timezon info (so we can compare with the logged entries)
+                from_date = datemath.dm(args[0], type='datetime').astimezone().replace(tzinfo=None)
+            except:
+                pass
+        if len(args) >= 2:
+            try:
+                to_date = datemath.dm(args[1], type='datetime').astimezone().replace(tzinfo=None)
+            except:
+                pass
+
+        # we have daily logs, and do not need to read every one
+        data = self.read_log_every_nth(from_date=from_date, to_date=to_date)
+        if not data.shape[0]:
+            bot.send_message(chat_id=chat_id, text='Cannot get the data for the graph.', reply_markup=self.reply_markup)
+            logging.info('Graph cannot be sent to {}: insufficient data.'.format(chat_id))
+            return False
+
+        # filter date range
+        data = data[from_date:to_date]
+
+        if not data.shape[0]:
+            d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
+            d2 = to_date.strftime("%Y-%m-%d %H:%M:%S")
+            bot.send_message(chat_id=chat_id, text='No data available between {} and {}.'.format(
+                d1, d2), reply_markup=self.reply_markup)
+            logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
+            return False
+
+        fig, axs = plt.subplots(len(self.LOG_labels), 1, sharex=True, figsize=(8, 8))
+        colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0']
+        for i, label in enumerate(self.LOG_labels):
+            # filter non-positive values
+            c = self.LOG_labels_orig[i]
+            if i in cfg.GRAPH_IGNORE_NONPOSITIVE_INDICES:
+                data[c][data[c] < 0] = np.nan
+            logy = False
+            if i in cfg.GRAPH_LOG_INDICES:
+                logy = True
+
+            data.plot(y=c, ax=axs[i], color=colors[i % len(colors)], ls='-', lw=2, ms=0, legend=None, logy=logy)
+            axs[i].set_ylabel(label)
+        # axs[-1].set_xlabel('date')
+        fig.autofmt_xdate()
+        plt.tight_layout()
+        fig.subplots_adjust(wspace=0, hspace=0)
+        plt.savefig(bio, format='png', dpi=100)
+        bio.seek(0)
+        bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
+        logging.info('Graph sent to {}.'.format(chat_id))
+
     def read_log_every_nth_auto_density(self, num_days):
         """auto adjusts how many lines should be skipped of lines when reading the log file"""
         n = int(cfg.GRAPH_EVERY_NTH_LINE) * num_days
@@ -747,33 +748,43 @@ class LabBot:
         n = min(n, cfg.GRAPH_EVERY_NTH_LINE_MAX)
         return int(n)
 
-    def read_log_every_nth(self, n=-1, first_day=-1, last_day=0):
-        """reads every n-th line of the data from the logs of the days between first_day and last_day.
+    def read_log_every_nth(self, from_date, to_date, n=-1):
+        """reads every n-th line of the data from the logs of the days between from_date and to_date.
         If n is -1, then an auto-adjustment will be done depending on the number of days."""
-        def str2date(x):
-            return datetime.datetime.strptime(x.decode("utf-8"), cfg.DATE_FMT_LOG)
 
-        if first_day > last_day:
-            first_day, last_day = last_day, first_day
-        num_days = last_day - first_day
+        if from_date > to_date:
+            from_date, to_date = to_date, from_date
+
+        diff_seconds = np.abs((to_date - from_date).total_seconds())
+        day_seconds = datetime.timedelta(days=1).total_seconds()
+        num_days = diff_seconds / day_seconds   # get fraction of days
 
         if num_days > cfg.GRAPH_DAYS_MAX:
-            first_day = last_day - cfg.GRAPH_DAYS_MAX
+            from_date = to_date - datetime.timedelta(days=cfg.GRAPH_DAYS_MAX)
+            num_days = cfg.GRAPH_DAYS_MAX
         if n < 0:
             n = self.read_log_every_nth_auto_density(num_days)
 
         datas = []
-        for i in range(first_day, last_day + 1):
-            log_file = (datetime.datetime.now() + datetime.timedelta(days=i)).strftime(cfg.LOG_FILE)
-            dtypes = [object] + [float] * len(self.LOG_labels)  # time and labels
-            usecols = range(len(dtypes))
+        this_date = from_date
+        while this_date <= to_date:
+            log_file = this_date.strftime(cfg.LOG_FILE)
             try:
-                with open(log_file) as fp:
-                    datas.append(np.genfromtxt(itertools.islice(fp, 0, None, n), delimiter=cfg.LOG_FILE_DELIMITER, dtype=dtypes, usecols=usecols, names=None, skip_header=1, comments='#', converters={0: str2date}))
+                # we can use skiprows here, but I found that it doesn't really speed up things; so we do the rolling mean in the next line
+                df = pd.read_csv(log_file,
+                    sep=cfg.LOG_FILE_DELIMITER,
+                    comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                    parse_dates=True,
+                    date_parser=self.str2date,
+                    index_col=0,
+                    dtype=np.float)
+                datas.append(df.rolling(n).mean().iloc[::n, :])
             except FileNotFoundError:
                 pass
+            this_date += datetime.timedelta(days=cfg.LOG_FILE_EVERY_DAYS)
+
         if len(datas) > 0:
-            return np.concatenate(datas)
+            return pd.concat(datas, sort=False)
         else:
             return None
 
@@ -785,41 +796,39 @@ class LabBot:
 
         self.log_file = (datetime.datetime.now() - datetime.timedelta(seconds=10)).strftime(cfg.LOG_FILE)
 
-        read_line_success = False
         try:
             with open(self.log_file, "rb") as fp:
                 firstline = fp.readline().decode()
-                log_labels = []
-                for l in firstline.split(cfg.LOG_FILE_DELIMITER):
-                    if len(l.strip()) > 0:
-                        log_labels.append(cfg.LOG_NAMES_REPLACEMENT(l.strip()))
+                log_labels_orig = pd.read_csv(io.StringIO(firstline),
+                    nrows=0,
+                    sep=cfg.LOG_FILE_DELIMITER).columns.tolist()[1:]  # first index is date-time
+                log_labels = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels_orig))
                 fp.seek(-maxLineLength * 22, 2)  # 2 means "from the end of the file"
-                i = -1
-                lines = fp.readlines()
-                while True:
-                    lastline = lines[i].decode()
-                    if lastline[0] != '#':  # not a comment line, it is all good
-                        read_line_success = True
-                        break
-                    i -= 1
-                    if i < -20:
-                        break
+
+                df = pd.read_csv(fp,
+                    sep=cfg.LOG_FILE_DELIMITER,
+                    comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                    parse_dates=True,
+                    date_parser=self.str2date,
+                    header=None,
+                    skiprows=1,
+                    index_col=0,
+                    dtype=np.float)
+                if df.shape[0] > 0:
+                    if df.shape[1] == len(log_labels):
+                        self.LOG_labels = log_labels
+                        self.LOG_labels_orig = log_labels_orig
+                        self.LOG_last_checked = df.tail(1).index.to_pydatetime()[0]
+
+                        self.LOG_data = df.iloc[-1, :].tolist()
+                    else:
+                        logging.warning('Problem extracting fields and field labels from log file {}.'.format(self.log_file))
+                else:
+                    logging.warning('Problem getting last line from log file {}.'.format(self.log_file))
         except OSError:
             logging.warning('Problem reading log file {}.'.format(self.log_file))
-
-        if read_line_success:
-            fields = lastline.split()
-            if len(fields) == len(log_labels):  # we get two fields for the date time, which are cut off
-                self.LOG_labels = log_labels[1:]  # first one is the time
-                self.LOG_last_checked = datetime.datetime.strptime(
-                    fields[0], cfg.DATE_FMT_LOG)  # alternatively use: dateutil.parser.parse
-                self.LOG_data = []
-                for f in fields[1:]:  # cut off the time
-                    self.LOG_data.append(float(f))
-            else:
-                logging.warning('Problem extracting fields and field labels from log file {}.'.format(self.log_file))
-        else:
-            logging.warning('Problem getting last line from log file {}.'.format(self.log_file))
+        # except:
+        #     logging.warning('Problem parsing log file {}.'.format(self.log_file))
 
         self.check_sanity()
         self.check_user_notifications()
