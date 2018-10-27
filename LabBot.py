@@ -714,7 +714,7 @@ class LabBot:
         # filter date range
         # data = data[from_date:to_date]
         # the slicing causes problems for nonmonotonous data, which can happen when DST ends or when the log files are weird
-        data[(data.index>from_date) & (data.index<to_date)]
+        data = data[(data.index>from_date) & (data.index<to_date)]
 
         if not data.shape[0]:
             d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
