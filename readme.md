@@ -4,7 +4,9 @@ A Telegram bot that monitors sensor data and sends notifications in case of prob
 
 ## Screenshots
 
-|![](https://github.com/alexriss/labbot/blob/master/screenshots/screenshot_1.png) | ![](https://github.com/alexriss/labbot/blob/master/screenshots/screenshot_2.png) | ![](https://github.com/alexriss/labbot/blob/master/screenshots/screenshot_3.png) |
+|   |   |   |
+| --- | --- | --- |
+| <img src='https://github.com/alexriss/labbot/blob/master/screenshots/screenshot_1.png' width='250' \> | <img src='https://github.com/alexriss/labbot/blob/master/screenshots/screenshot_2.png' width='250' \> | <img src='https://github.com/alexriss/labbot/blob/master/screenshots/screenshot_3.png' width='250' \> |
 
 ## Features
 
