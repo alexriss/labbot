@@ -142,12 +142,7 @@ LOGGING_FILENAME = (
 LOGGING_ERROR_EVERY_MINUTES = 15  # write warnings to log every n minutes
 
 GRAPH_DEFAULT_DAYS = 0.5  # default range for graphs (i.e. this many days into the past)
-GRAPH_EVERY_NTH_LINE = (
-    30
-)  # use every n-th line in the log file for plotting (this is for 1 day, it will be automatically adjusted for different ranges)
-GRAPH_EVERY_NTH_LINE_MAX = (
-    1000
-)  # maximum number for GRAPH_EVERY_NTH_LINE after auto-adjustment
+GRAPH_MAX_POINTS = 2880  # maximum number of points to plot (if we have more data, it will e averaged)
 GRAPH_DAYS_MAX = 31  # maximum number of days to plot
 GRAPH_LOG_INDICES = [0, 1]  # use logarothmic y-scale for these indices
 # ignore negative values for these indices (errors can be encoded as negative values)

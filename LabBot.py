@@ -253,7 +253,7 @@ class LabBot:
         logging.info('Version {} sent to {}'.format(version, update.message.chat_id))
 
     @restricted
-    @send_action(ChatAction.TYPING)
+    # @send_action(ChatAction.TYPING)
     def message_command_handler(self, bot, update, chat_id=0):
         """checks for possible commands in the message (without the '/' prefix"""
 
@@ -676,6 +676,7 @@ class LabBot:
     @send_action(ChatAction.UPLOAD_PHOTO)
     def status_graph(self, bot, update, args=[], chat_id=0, error_str=""):
         chat_id = self.get_chat_id(update, chat_id)
+        bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
 
         now = datetime.datetime.now()
         bio = io.BytesIO()
@@ -683,7 +684,7 @@ class LabBot:
 
         # default values
         from_date = now - datetime.timedelta(days=cfg.GRAPH_DEFAULT_DAYS)
-        to_date = now + datetime.timedelta(days=1)
+        to_date = now + datetime.timedelta(hours=1)  # we want some extra time, just in case
 
         # on cell phones - and + often add spaces afterwards
         args = " ".join(args).replace('- ', '-').replace('+ ', '+').split()
@@ -704,15 +705,16 @@ class LabBot:
         if from_date > to_date:
             from_date, to_date = to_date, from_date
 
-        # we have daily logs, and do not need to read every one
-        data = self.read_log_every_nth(from_date=from_date, to_date=to_date)
+        data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
         if not data.shape[0]:
             bot.send_message(chat_id=chat_id, text='Cannot get the data for the graph.', reply_markup=self.reply_markup)
             logging.info('Graph cannot be sent to {}: insufficient data.'.format(chat_id))
             return False
 
         # filter date range
-        data = data[from_date:to_date]
+        # data = data[from_date:to_date]
+        # the slicing causes problems for nonmonotonous data, which can happen when DST ends or when the log files are weird
+        data[(data.index>from_date) & (data.index<to_date)]
 
         if not data.shape[0]:
             d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -723,11 +725,12 @@ class LabBot:
             return False
 
         fig, axs = plt.subplots(len(self.LOG_labels), 1, sharex=True, figsize=(8, 8))
-        colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0']
+        colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0', '#285ca0']
         for i, label in enumerate(self.LOG_labels):
             # filter non-positive values
             c = self.LOG_labels_orig[i]
             axs[i].set_ylabel(label)
+            axs[i].tick_params(direction='in')
             if c not in data:
                 continue
             if i in cfg.GRAPH_IGNORE_NONPOSITIVE_INDICES:
@@ -736,25 +739,18 @@ class LabBot:
             if i in cfg.GRAPH_LOG_INDICES:
                 logy = True
             data.plot(y=c, ax=axs[i], color=colors[i % len(colors)], ls='-', lw=2, ms=0, legend=None, logy=logy)
-        # axs[-1].set_xlabel('date')
+        axs[-1].set_xlabel('')
         fig.autofmt_xdate()
-        plt.tight_layout()
-        fig.subplots_adjust(wspace=0, hspace=0)
+        plt.tight_layout(pad=1.02, w_pad=0, h_pad=0)
+        # fig.subplots_adjust(wspace=0, hspace=0)
         plt.savefig(bio, format='png', dpi=100)
         bio.seek(0)
         bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
         logging.info('Graph sent to {}.'.format(chat_id))
 
-    def read_log_every_nth_auto_density(self, num_days):
-        """auto adjusts how many lines should be skipped of lines when reading the log file"""
-        n = int(cfg.GRAPH_EVERY_NTH_LINE) * num_days
-        n = max(n, 1)
-        n = min(n, cfg.GRAPH_EVERY_NTH_LINE_MAX)
-        return int(n)
-
-    def read_log_every_nth(self, from_date, to_date, n=-1):
-        """reads every n-th line of the data from the logs of the days between from_date and to_date.
-        If n is -1, then an auto-adjustment will be done depending on the number of days."""
+    def read_logs(self, from_date, to_date):
+        """reads logs for the days between from_date and to_date.
+        If the number of columns is too big, it will be reduced using rolling averaging."""
 
         if from_date > to_date:
             from_date, to_date = to_date, from_date
@@ -766,8 +762,6 @@ class LabBot:
         if num_days > cfg.GRAPH_DAYS_MAX:
             from_date = to_date - datetime.timedelta(days=cfg.GRAPH_DAYS_MAX)
             num_days = cfg.GRAPH_DAYS_MAX
-        if n < 0:
-            n = self.read_log_every_nth_auto_density(num_days)
 
         datas = []
         this_date = from_date
@@ -782,13 +776,18 @@ class LabBot:
                                  date_parser=self.str2date,
                                  index_col=0,
                                  dtype=np.float)
-                datas.append(df.rolling(n).mean().iloc[::n, :])
+                datas.append(df)
             except FileNotFoundError:
                 pass
             this_date += datetime.timedelta(days=cfg.LOG_FILE_EVERY_DAYS)
 
         if len(datas) > 0:
-            return pd.concat(datas, sort=False)
+            data = pd.concat(datas, sort=False)
+            if data.shape[0] > cfg.GRAPH_MAX_POINTS:
+                n = int(np.ceil(cfg.GRAPH_MAX_POINTS / data.shape[0]))
+                return data.rolling(n).mean().iloc[::n, :]
+            else:
+                return data
         else:
             return None
 
