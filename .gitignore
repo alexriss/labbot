@@ -48,4 +48,5 @@ LabBot_config.py
 !LabBot.py
 !LabBot_config_example.py
 !screenshots
+!screenshots/*
 !readme.md
