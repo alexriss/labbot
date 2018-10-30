@@ -47,7 +47,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.12
+        self.__version__ = 0.13
 
         self.LOG_last_checked = None   # date and time of when the log was last checked
         self.LOG_data = {}             # data of one log line, keys are labels
@@ -770,8 +770,8 @@ class LabBot:
         # colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0', '#285ca0']
         for i, c in enumerate(columns_toplot):
             # filter non-positive values
-            axs[i,0].set_ylabel(self.LOG_labels_nice[c])
-            axs[i,0].tick_params(direction='in')
+            axs[i, 0].set_ylabel(self.LOG_labels_nice[c])
+            axs[i, 0].tick_params(direction='in')
             if c not in data:
                 continue
             if c in cfg.GRAPH_IGNORE_LOWERTHAN:
@@ -780,8 +780,8 @@ class LabBot:
             logy = False
             if c in cfg.GRAPH_LOG_COLUMNS:
                 logy = True
-            data.plot(y=c, ax=axs[i,0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
-        axs[-1,0].set_xlabel('')
+            data.plot(y=c, ax=axs[i, 0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
+        axs[-1, 0].set_xlabel('')
         fig.autofmt_xdate()
         plt.tight_layout(pad=1.02, w_pad=0, h_pad=0)
         # fig.subplots_adjust(wspace=0, hspace=0)
