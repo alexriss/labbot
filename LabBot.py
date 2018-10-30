@@ -350,7 +350,7 @@ class LabBot:
         chat_id = self.get_chat_id(update, chat_id)
         str_out = '*Warning limits:*\n'
         for key, error in cfg.ERROR_LIMITS_MAX.items():
-            str_out += '*{}:* {},  {}\n'.format(self.LOG_labels[error['column']], error['limits'][0], error['limits'][1])
+            str_out += '*{}:* {},  {}\n'.format(self.LOG_labels_nice[error['column']], error['limits'][0], error['limits'][1])
 
         str_quiet_start = '{:02d}:{:02d}'.format(*divmod(int(cfg.QUIET_TIMES_HOURS_START * 60), 60))
         str_quiet_end = '{:02d}:{:02d}'.format(*divmod(int(cfg.QUIET_TIMES_HOURS_END * 60), 60))
@@ -585,6 +585,8 @@ class LabBot:
         str_out += '*Graphs* can be plotted using the "graph" keyword or "/graph" and "/g" commands. '
         str_out += 'Extra parameters are possible to specify _from_ and _to_ dates.\n'
         str_out += 'Try: "/g -3d" or "g -12h -10h"\n\n'
+        str_out += 'The graph and status commands both support extra arguments specifying the sensor data that should be plotted.\n'
+        str_out += '"g afm prep tafm" or "s all".\n\n'
         str_out += '*User notifications* can be set up using:\n'
         str_out += '/n afm < 1e-10\n'
         str_out += 'n afm lt 1e-10\n'
