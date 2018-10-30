@@ -704,6 +704,20 @@ class LabBot:
             self.error_remove(error)
 
     @restricted
+    @send_action(ChatAction.TYPING)
+    def status_graph_no_data(self, bot, update, args=[], chat_id=0, from_date=None, to_date=None):
+        """sends a message that no data is available"""
+        d1 = ""
+        d2 = ""
+        if from_date:
+            d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
+        if to_date:
+            d2 = to_date.strftime("%Y-%m-%d %H:%M:%S")
+        bot.send_message(chat_id=chat_id, text='No data available between {} and {}.'.format(
+            d1, d2), reply_markup=self.reply_markup)
+        logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
+
+    @restricted
     @send_action(ChatAction.UPLOAD_PHOTO)
     def status_graph(self, bot, update, args=[], chat_id=0, error_str=""):
         chat_id = self.get_chat_id(update, chat_id)
@@ -752,22 +766,16 @@ class LabBot:
             from_date, to_date = to_date, from_date
 
         data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
-        if not data.shape[0]:
-            bot.send_message(chat_id=chat_id, text='Cannot get the data for the graph.', reply_markup=self.reply_markup)
-            logging.info('Graph cannot be sent to {}: insufficient data.'.format(chat_id))
+        if data is  None:
+            self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
-
         # filter date range
         # data = data[from_date:to_date]
         # the slicing causes problems for nonmonotonous data, which can happen when DST ends or when the log files are weird
         data = data[(data.index > from_date) & (data.index < to_date)]
 
         if not data.shape[0]:
-            d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
-            d2 = to_date.strftime("%Y-%m-%d %H:%M:%S")
-            bot.send_message(chat_id=chat_id, text='No data available between {} and {}.'.format(
-                d1, d2), reply_markup=self.reply_markup)
-            logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
+            self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
 
         fig, axs = plt.subplots(len(columns_toplot), 1, sharex=True, squeeze=False, figsize=(8, 0.5 + 2 * len(columns_toplot)))
@@ -778,6 +786,7 @@ class LabBot:
             color = plt.cm.tab20(np.linspace(0, 1, 10))[i % len(self.LOG_labels)]
             colors[c] = matplotlib.colors.rgb2hex(color[0:3])
         # colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0', '#285ca0']
+        total_count = 0
         for i, c in enumerate(columns_toplot):
             # filter non-positive values
             axs[i, 0].set_ylabel(self.LOG_labels_nice[c])
@@ -790,7 +799,15 @@ class LabBot:
             logy = False
             if c in cfg.GRAPH_LOG_COLUMNS:
                 logy = True
-            data.plot(y=c, ax=axs[i, 0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
+            count = data[c].count()
+            total_count += count
+            if count:
+                data.plot(y=c, ax=axs[i, 0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
+
+        if not total_count:
+            self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
+            return False
+
         axs[-1, 0].set_xlabel('')
         fig.autofmt_xdate()
         plt.tight_layout(pad=1.02, w_pad=0, h_pad=0)
