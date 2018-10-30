@@ -91,6 +91,15 @@ class LabBot:
 
         logging.info('{} set up.'.format(cfg.BOT_ID))
 
+    def get_version(self, markdown=False):
+        """returns class version information"""
+        if markdown:
+            str_out = '*{}* ({})'
+        else:
+            str_out = '{} ({})'
+        return str_out.format(self.__version__,
+                              datetime.datetime.fromtimestamp(os.path.getmtime(sys.argv[0])).strftime(cfg.DATE_FMT_BOT))
+
     def send_action(action):
         """Sends `action` while processing func command."""
         def decorator(func):
@@ -245,8 +254,7 @@ class LabBot:
     @send_action(ChatAction.TYPING)
     def version_handler(self, bot, update, args=[], chat_id=0):
         """send version information"""
-        version = '*{}* ({})'.format(self.__version__,
-                                     datetime.datetime.fromtimestamp(os.path.getmtime(sys.argv[0])).strftime(cfg.DATE_FMT_BOT))
+        version = self.get_version(markdown=True)
         bot.send_message(chat_id=update.message.chat_id, text=version,
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('Version {} sent to {}'.format(version, update.message.chat_id))
@@ -1058,3 +1066,4 @@ if __name__ == "__main__":
     b = LabBot()
     b.start_bot()
     print('Bot started.')
+    print('Version: {}'.format(b.get_version()))
