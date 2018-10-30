@@ -13,10 +13,8 @@
 # Alex Riss, 2018, GPL
 #
 # TODO:
-#   - move from index-based notation in config and notifications to label based notation (i.e. column names)
 #   - better comments and documentation
 #   - unit tests
-#   - github: screenshot.gif and example log-file
 #   - bakeout control and sending of webcam photos
 #   - inlinehandlers
 #   - friendly and hostile modes for random text messages
@@ -29,6 +27,7 @@ import datetime
 import datemath
 import io
 import logging
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -51,9 +50,9 @@ class LabBot:
         self.__version__ = 0.12
 
         self.LOG_last_checked = None   # date and time of when the log was last checked
-        self.LOG_data = []             # data of one log line
+        self.LOG_data = {}             # data of one log line, keys are labels
         self.LOG_labels = []           # labels for log data
-        self.LOG_labels_orig = []      # labels for log data without string replacements
+        self.LOG_labels_nice = {}      # labels for log data with string replacements (keys are the LOG_labels)
         # list of users with dictionary of errors, keys are the error strings and values contain extra error information
         self.ERRORS_checks = {}
         self.LOGGING_last_write = {}   # dictionary of errors, keys are the error strings and values contain timestamp of last written log
@@ -149,7 +148,7 @@ class LabBot:
         self.commands = [  # will be used in the message_command_handler
             {'keywords': ['start', 'hello', 'hi'], 'func': self.hello_handler},
             {'keywords': ['temp', 'temperature', 't', 's', 'status',
-                          'pressure', 'status', 'p'], 'func': self.status_pressure},
+                          'pressure', 'status', 'p'], 'func': self.status_sensors},
             {'keywords': ['graph', 'g'], 'func': self.status_graph},
             {'keywords': ['warning', 'warnings', 'w'], 'func': self.warnings_config},
             {'keywords': ['notify', 'n'], 'func': self.user_notifications_manage},
@@ -168,13 +167,13 @@ class LabBot:
         self.dispatcher.add_handler(CommandHandler(['graph', 'g'], self.status_graph, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['warning', 'warnings', 'w'], self.warnings_config))
         self.dispatcher.add_handler(CommandHandler(
-            ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_pressure))
+            ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_sensors, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['bakeout'], self.status_bakeout))
         self.dispatcher.add_handler(CommandHandler(['photo', 'pic'], self.status_photo))
 
         self.dispatcher.add_handler(MessageHandler(Filters.command, self.unknown_command_handler))
 
-        self.dispatcher.add_handler(MessageHandler(FilterPressure(), self.status_pressure))
+        self.dispatcher.add_handler(MessageHandler(FilterPressure(), self.status_sensors))
         self.dispatcher.add_handler(MessageHandler(FilterBakeout(), self.status_bakeout))
         self.dispatcher.add_handler(MessageHandler(FilterPhoto(), self.status_photo))
         self.dispatcher.add_handler(MessageHandler(FilterHelp(), self.help_message))
@@ -215,7 +214,7 @@ class LabBot:
         """handles inline button callbacks"""
         querydata = update.callback_query.data
         if querydata == '/status':
-            self.status_pressure(bot, update)
+            self.status_sensors(bot, update)
         elif querydata == '/graph':
             self.status_graph(bot, update)
         elif querydata == '/bakeout':
@@ -313,16 +312,21 @@ class LabBot:
         """returns random element from elements"""
         return elements[random.randint(0, len(elements) - 1)]
 
-    def replace_nonnegative(self, log_data):
+    def get_column_name(self, query, default=False):
+        """returns column label associated with query"""
+        query = query.lower()
+        for key, vals in cfg.COLUMNS_LABELS.items():
+            for val in vals:
+                if val.lower() in query:  # or key.lower() in query:
+                    return key
+        return default
+
+    def replace_lowerthan(self, log_data):
         """replaces negative values with error codes"""
-        log_data_replaced = log_data[:]
-        for i in cfg.ERROR_NONPOSITIVE_INDICES:
-            if log_data[i] < 0:
-                for keys, e_dict in cfg.ERROR_NONPOSITIVE_VALUES.items():
-                    if e_dict['index'] == i and e_dict['value'] == log_data[i]:
-                        log_data_replaced[i] = e_dict['value_replace']
-                        break
-        return log_data_replaced
+        for c, val in log_data.items():
+            if val in cfg.VALUES_REPLACE.keys():
+                log_data[c] = cfg.VALUES_REPLACE[val]
+        return log_data
 
     @restricted
     @send_action(ChatAction.TYPING)
@@ -336,16 +340,16 @@ class LabBot:
     def warnings_config(self, bot, update, args=[], chat_id=0):
         """lists all warnings"""
         chat_id = self.get_chat_id(update, chat_id)
-        str = '*Warning limits:*\n'
+        str_out = '*Warning limits:*\n'
         for key, error in cfg.ERROR_LIMITS_MAX.items():
-            str += '*{}:* {},  {}\n'.format(self.LOG_labels[error['index']], error['limits'][0], error['limits'][1])
+            str_out += '*{}:* {},  {}\n'.format(self.LOG_labels[error['column']], error['limits'][0], error['limits'][1])
 
         str_quiet_start = '{:02d}:{:02d}'.format(*divmod(int(cfg.QUIET_TIMES_HOURS_START * 60), 60))
         str_quiet_end = '{:02d}:{:02d}'.format(*divmod(int(cfg.QUIET_TIMES_HOURS_END * 60), 60))
         str_quiet_days = ", ".join(calendar.day_abbr[n] for n in cfg.QUIET_TIMES_WEEKDAYS)
-        str += '\n_The first value is the upper limit outside of quiet hours, second value is within quiet hours.'
-        str += ' Quiet hours are from {} to {} on {}. These settings can be changed by your administrator._'.format(str_quiet_start, str_quiet_end, str_quiet_days)
-        bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+        str_out += '\n_The first value is the upper limit outside of quiet hours, second value is within quiet hours.'
+        str_out += ' Quiet hours are from {} to {} on {}. These settings can be changed by your administrator._'.format(str_quiet_start, str_quiet_end, str_quiet_days)
+        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('List of warning limits sent to {}.'.format(chat_id))
 
     @restricted
@@ -376,11 +380,11 @@ class LabBot:
                     logging.info("Error {} disabled for {} hours by {}.".format(error, hours, chat_id))
 
         if hours == 0:
-            str = 'All warning messages re-enabled.'
+            str_out = 'All warning messages re-enabled.'
         else:
             str_error_names = ", ".join([cfg.WARNING_NAMES[e] for e in list_disabled])
-            str = 'Active warning messages ({}) disabled for {} hours.'.format(str_error_names, hours)
-        bot.send_message(chat_id=chat_id, text=str, reply_markup=self.reply_markup)
+            str_out = 'Active warning messages ({}) disabled for {} hours.'.format(str_error_names, hours)
+        bot.send_message(chat_id=chat_id, text=str_out, reply_markup=self.reply_markup)
 
     @restricted
     def send_message_users(self, bot, update, args=[], chat_id=0):
@@ -401,25 +405,25 @@ class LabBot:
             comparator = '>'
         else:
             comparator = '<'
-        str = '{} {} {}'.format(self.LOG_labels[notification['index']], comparator, notification['limit'])
-        str = self.escape_markdown(str)
+        str_out = '{} {} {}'.format(self.LOG_labels_nice[notification['column']], comparator, notification['limit'])
+        str_out = self.escape_markdown(str_out)
         if 'active' in notification.keys():
             if not notification['active']:
-                str += ' _(inactive)_'
-        return str
+                str_out += ' _(inactive)_'
+        return str_out
 
     def notification_list(self, user):
         """returns notification list"""
         if 'notifications' not in self.USER_config[user].keys():
-            str = 'No notifications are set up.'
+            str_out = 'No notifications are set up.'
         elif len(self.USER_config[user]['notifications']) < 1:
-            str = 'No notifications are set up.'
+            str_out = 'No notifications are set up.'
         else:
-            str = '*Notifications:*\n'  # u"\U0001F4D1"
+            str_out = '*Notifications:*\n'  # u"\U0001F4D1"
             for i, n in enumerate(self.USER_config[user]['notifications']):
-                str += "*{:d}*: {}\n".format(i + 1, self.notification_to_string(n))
+                str_out += "*{:d}*: {}\n".format(i + 1, self.notification_to_string(n))
 
-        return str
+        return str_out
 
     def notification_change(self, user, args, action="act"):
         """deletes, activates, deactivates notifications. Action is one of "act", "deact", "del". """
@@ -463,9 +467,9 @@ class LabBot:
             return False
 
         if args[0] in ['list', 'l']:  # list notifications
-            str = self.notification_list(chat_id)
+            str_out = self.notification_list(chat_id)
 
-            bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN)
+            bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification list sent to {}.'.format(chat_id))
             return True
 
@@ -499,8 +503,8 @@ class LabBot:
             args = args[1:]
 
         # remove all special characters and put extra whitespace around '<' and '>', also replace ',' for '.'
-        query_string = re.sub(r'[^\w\s<>+-.,]', '', ' '.join(args)).replace('>',
-                                                                            ' > ').replace('<', ' < ').replace(',', '.')
+        query_string = re.sub(r'[^\w\s<>+-.,]', '',
+                              ' '.join(args)).replace('>', ' > ').replace('<', ' < ').replace(',', '.')
         query_items = query_string.split()
         if len(query_items) != 3:
             bot.send_message(chat_id=chat_id, text='Notification should contain three elements,\ne.g. "/n temp < 8".',
@@ -508,14 +512,11 @@ class LabBot:
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
 
-        index = -1
-        for key, val in cfg.INDICES_LABELS.items():
-            if query_items[0].lower() in val:
-                index = key
-        if index == -1:
-            str = ", ".join([val[0] for val in cfg.INDICES_LABELS.values()])
+        column = self.get_column_name(query_items[0])
+        if not column:
+            str_out = ", ".join([val[0] for val in cfg.COLUMNS_LABELS.values()])
             bot.send_message(chat_id=chat_id, text='I do not recognize the first element. It should be one of:\n{}'.format(
-                str), parse_mode=telegram.ParseMode.MARKDOWN)
+                str_out), parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
 
@@ -538,16 +539,16 @@ class LabBot:
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
 
-        n = {'index': index, 'comparison': comparison, 'limit': limit}
+        n = {'column': column, 'comparison': comparison, 'limit': limit}
 
         if 'notifications' not in self.USER_config[chat_id].keys():
             self.USER_config[chat_id]['notifications'] = []
         self.USER_config[chat_id]['notifications'].append(n)
-        str = self.notification_to_string(n)
+        str_out = self.notification_to_string(n)
         self.save_config = True
         bot.send_message(chat_id=chat_id, text='Notification set up: {}\n\n{}'.format(
-            str, self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN)
-        logging.info('Notification set up for {}: {}.'.format(chat_id, str))
+            str_out, self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN)
+        logging.info('Notification set up for {}: {}.'.format(chat_id, str_out))
 
     @restricted
     @send_action(ChatAction.TYPING)
@@ -567,46 +568,66 @@ class LabBot:
     def help_message(self, bot, update, chat_id=0):
         """Prints a help message."""
         chat_id = self.get_chat_id(update, chat_id)
-        str = 'Ask me for *status updates* using: "status" or "/status" or "s".\n'
-        str += 'Pressure, temperature and logging warnings will be sent every {:d} minutes. '.format(
+        str_out = 'Ask me for *status updates* using: "status" or "/status" or "s".\n'
+        str_out += 'Pressure, temperature and logging warnings will be sent every {:d} minutes. '.format(
             cfg.WARNING_SEND_EVERY_MINUTES)
-        str += 'Use /w or /warnings to see warning limits.\n\n'
-        str += 'The active *warnings can be silenced* for n hours using the command "/silence n".\n'
-        str += 'n=0 will re-enable normal warnings.\n\n'
-        str += '*Graphs* can be plotted using the "graph" keyword or "/graph" and "/g" commands. '
-        str += 'Extra parameters are possible to specify _from_ and _to_ dates.\n'
-        str += 'Try: "/g -3d" or "g -12h -10h"\n\n'
-        str += '*User notifications* can be set up using:\n'
-        str += '/n afm < 1e-10\n'
-        str += 'n afm lt 1e-10\n'
-        str += 'n list\n'
-        str += 'n t < 10\n'
-        str += 'n list\n'
-        str += 'n del 1  _(delete notification 1)_'
-        str += 'n deact all  _(deactivate all notifications)_'
-        str += 'n act 1 2 3   _(activate notifications 1,2, and 3)_'
-        bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN,
+        str_out += 'Use /w or /warnings to see warning limits.\n\n'
+        str_out += 'The active *warnings can be silenced* for n hours using the command "/silence n".\n'
+        str_out += 'n=0 will re-enable normal warnings.\n\n'
+        str_out += '*Graphs* can be plotted using the "graph" keyword or "/graph" and "/g" commands. '
+        str_out += 'Extra parameters are possible to specify _from_ and _to_ dates.\n'
+        str_out += 'Try: "/g -3d" or "g -12h -10h"\n\n'
+        str_out += '*User notifications* can be set up using:\n'
+        str_out += '/n afm < 1e-10\n'
+        str_out += 'n afm lt 1e-10\n'
+        str_out += 'n list\n'
+        str_out += 'n t < 10\n'
+        str_out += 'n list\n'
+        str_out += 'n del 1  _(delete notification 1)_'
+        str_out += 'n deact all  _(deactivate all notifications)_'
+        str_out += 'n act 1 2 3   _(activate notifications 1,2, and 3)_'
+        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_pressure(self, bot, update, args=[], chat_id=0, error_str=""):
-        str = error_str
+    def status_sensors(self, bot, update, args=[], chat_id=0, error_str=""):
+        str_out = error_str
         if self.LOG_last_checked:
             if datetime.datetime.now() - self.LOG_last_checked < datetime.timedelta(hours=cfg.DATE_FMT_BOT_SHORT_HOURS):
-                str += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT_SHORT) + "*"
+                str_out += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT_SHORT) + "*"
             else:
-                str += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + "*"
+                str_out += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + "*"
         if self.quiet_hours():
-            str += ' _(quiet hours)_'
-        str += "\n"
-        str += "\n".join(["*{}*: {:.{prec}g}".format(
-            label, data, prec=cfg.FLOAT_PRECISION_BOT) for label, data in zip(self.LOG_labels, self.replace_nonnegative(self.LOG_data))]
-        )
+            str_out += ' _(quiet hours)_'
 
+        query_string = ' '.join(args)
+        query_string = re.sub(r'[^\w\s]', ' ', query_string.replace('-', ''))
+        query_items = query_string.split()
+
+        columns = []
+        if 'all' in query_items:  # display data for all sensors
+            columns = self.LOG_labels
+        else:
+            for q in query_items:
+                c = self.get_column_name(q)
+                if c:
+                    columns.append(c)
+        if not len(columns):
+            columns = cfg.STATUS_DEFAULT_COLUMNS
+
+        # TODO: also add columns associated with any errors
+
+        log_data_replaced = self.replace_lowerthan(self.LOG_data)
+        for c in columns:
+            val = log_data_replaced[c]
+            if isinstance(val, str):
+                str_out += "\n*{}*: {}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
+            else:
+                str_out += "\n*{}*: {:.{prec}g}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
         chat_id = self.get_chat_id(update, chat_id)
 
-        bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN,
+        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
         logging.info('Status sent to {}'.format(chat_id))
 
@@ -636,21 +657,21 @@ class LabBot:
                 if (self.ERRORS_checks[error][chat_id]['sendNext']):
                     if now <= self.ERRORS_checks[error][chat_id]['sendNext']:
                         continue
-                str = cfg.WARNING_MESSAGES[error]
+                str_out = cfg.WARNING_MESSAGES[error]
                 if error == 'ERROR_log_read':
                     if self.LOG_last_checked:
-                        str += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
+                        str_out += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
                     else:
-                        str += 'unknown.'
+                        str_out += 'unknown.'
                 bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN)
+                bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
                 self.ERRORS_checks[error][chat_id]['sendNext'] = now + \
                     datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES)
                 self.ERRORS_checks[error][chat_id]['timesSent'] += 1
                 logging.info('Warning message "{}" sent to {}.'.format(error, chat_id))
                 errors_sent = True
             if errors_sent:
-                self.status_pressure(bot, None, chat_id=chat_id)
+                self.status_sensors(bot, None, chat_id=chat_id)
 
     def status_error_off(self, bot, errors_off=[], errors_off_only_quiet=[]):
         """resets errors and sends de-warning message."""
@@ -660,15 +681,15 @@ class LabBot:
                 if chat_id not in self.ERRORS_checks[error]:
                     continue
                 if self.ERRORS_checks[error][chat_id]['timesSent'] > 0:
-                    str = cfg.WARNING_OFF_MESSAGES[error]
+                    str_out = cfg.WARNING_OFF_MESSAGES[error]
                     if error_off_only_quiet:
-                        str += cfg.WARNING_OFF_MESSAGE_ONLY_QUIET
+                        str_out += cfg.WARNING_OFF_MESSAGE_ONLY_QUIET
                     bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                    bot.send_message(chat_id=chat_id, text=str, parse_mode=telegram.ParseMode.MARKDOWN)
+                    bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
                     logging.info('De-warning message "{}" sent to {}.'.format(error, chat_id))
 
                 if dewarning_sent:
-                    self.status_pressure(bot, None, chat_id=chat_id)
+                    self.status_sensors(bot, None, chat_id=chat_id)
 
             self.error_remove(error)
 
@@ -687,7 +708,22 @@ class LabBot:
         to_date = now + datetime.timedelta(hours=1)  # we want some extra time, just in case
 
         # on cell phones - and + often add spaces afterwards
-        args = " ".join(args).replace('- ', '-').replace('+ ', '+').split()
+        args = " ".join(args).replace('- ', '-').replace('+ ', '+').replace(',', '.').split()
+
+        columns_toplot = []
+        if 'all' in args:
+            columns_toplot = self.LOG_labels
+        else:
+            args_to_delete = []
+            for i, arg in enumerate(args):
+                c = self.get_column_name(arg)
+                if c:
+                    columns_toplot.append(c)
+                    args_to_delete.append(i)
+            for i in args_to_delete[::-1]:
+                del args[i]
+        if not len(columns_toplot):
+            columns_toplot = cfg.GRAPH_DEFAULT_COLUMNS
 
         # parse args
         if len(args) >= 1:
@@ -724,22 +760,28 @@ class LabBot:
             logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
             return False
 
-        fig, axs = plt.subplots(len(self.LOG_labels), 1, sharex=True, figsize=(8, 8))
-        colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0', '#285ca0']
-        for i, label in enumerate(self.LOG_labels):
+        fig, axs = plt.subplots(len(columns_toplot), 1, sharex=True, squeeze=False, figsize=(8, 0.5 + 2 * len(columns_toplot)))
+
+        # get colors for columns
+        colors = {}
+        for i, c in enumerate(self.LOG_labels):
+            color = plt.cm.tab20(np.linspace(0, 1, 10))[i % len(self.LOG_labels)]
+            colors[c] = matplotlib.colors.rgb2hex(color[0:3])
+        # colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0', '#285ca0']
+        for i, c in enumerate(columns_toplot):
             # filter non-positive values
-            c = self.LOG_labels_orig[i]
-            axs[i].set_ylabel(label)
-            axs[i].tick_params(direction='in')
+            axs[i,0].set_ylabel(self.LOG_labels_nice[c])
+            axs[i,0].tick_params(direction='in')
             if c not in data:
                 continue
-            if i in cfg.GRAPH_IGNORE_NONPOSITIVE_INDICES:
-                data[c][data[c] < 0] = np.nan
+            if c in cfg.GRAPH_IGNORE_LOWERTHAN:
+                limit = cfg.GRAPH_IGNORE_LOWERTHAN[c]
+                data[c][data[c] <= limit] = np.nan
             logy = False
-            if i in cfg.GRAPH_LOG_INDICES:
+            if c in cfg.GRAPH_LOG_COLUMNS:
                 logy = True
-            data.plot(y=c, ax=axs[i], color=colors[i % len(colors)], ls='-', lw=2, ms=0, legend=None, logy=logy)
-        axs[-1].set_xlabel('')
+            data.plot(y=c, ax=axs[i,0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
+        axs[-1,0].set_xlabel('')
         fig.autofmt_xdate()
         plt.tight_layout(pad=1.02, w_pad=0, h_pad=0)
         # fig.subplots_adjust(wspace=0, hspace=0)
@@ -775,7 +817,8 @@ class LabBot:
                                  parse_dates=True,
                                  date_parser=self.str2date,
                                  index_col=0,
-                                 dtype=np.float)
+                                 dtype=np.float,
+                                 error_bad_lines=False)  # TODO: check if ignoring bad lines does not cause any other errors
                 datas.append(df)
             except FileNotFoundError:
                 pass
@@ -791,7 +834,7 @@ class LabBot:
         else:
             return None
 
-    def read_log(self, maxLineLength=90):
+    def read_log(self, maxLineLength=120):
         """parses log file on the server"""
 
         # set timer for next function call (in case there are any excetions below)
@@ -801,37 +844,34 @@ class LabBot:
 
         try:
             with open(self.log_file, "rb") as fp:
-                firstline = fp.readline().decode()
-                log_labels_orig = pd.read_csv(io.StringIO(firstline),
-                                              nrows=0,
-                                              sep=cfg.LOG_FILE_DELIMITER).columns.tolist()[1:]  # first index is date-time
-                log_labels = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels_orig))
-                fp.seek(-maxLineLength * 22, 2)  # 2 means "from the end of the file"
-
-                df = pd.read_csv(fp,
-                                 sep=cfg.LOG_FILE_DELIMITER,
-                                 comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
-                                 parse_dates=True,
-                                 date_parser=self.str2date,
-                                 header=None,
-                                 skiprows=1,
-                                 index_col=0,
-                                 dtype=np.float)
-                if df.shape[0] > 0:
-                    if df.shape[1] == len(log_labels):
-                        self.LOG_labels = log_labels
-                        self.LOG_labels_orig = log_labels_orig
-                        self.LOG_last_checked = df.tail(1).index.to_pydatetime()[0]
-
-                        self.LOG_data = df.iloc[-1, :].tolist()
-                    else:
-                        logging.warning('Problem extracting fields and field labels from log file {}.'.format(self.log_file))
-                else:
-                    logging.warning('Problem getting last line from log file {}.'.format(self.log_file))
+                line0 = fp.readline()
+                bytelength = maxLineLength * 22
+                fp.seek(-bytelength, 2)  # 2 means "from the end of the file"
+                lines = fp.read(bytelength)
         except OSError:
             logging.warning('Problem reading log file {}.'.format(self.log_file))
-        # except:
-        #     logging.warning('Problem parsing log file {}.'.format(self.log_file))
+
+        df = pd.read_csv(io.BytesIO(line0 + lines),
+                         sep=cfg.LOG_FILE_DELIMITER,
+                         comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                         parse_dates=True,
+                         date_parser=self.str2date,
+                         skiprows=[1],  # 0 are the column headers, 1 is truncated
+                         index_col=0,
+                         dtype=np.float,
+                         error_bad_lines=False)
+        log_labels = df.columns.tolist()
+        log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
+
+        if df.shape[0] > 0:
+            self.LOG_labels = log_labels
+            self.LOG_labels_nice = {l: l_nice for (l, l_nice) in zip(log_labels, log_labels_nice)}
+            self.LOG_last_checked = df.tail(1).index.to_pydatetime()[0]
+
+            # make a dictionary out of the dataframe
+            self.LOG_data = df.tail(1).to_dict(orient='records')[0]
+        else:
+            logging.warning('Problem extracting fields and field labels from log file {}.'.format(self.log_file))
 
         self.check_sanity()
         self.check_user_notifications()
@@ -897,22 +937,23 @@ class LabBot:
             elif error in cfg.ERROR_LIMITS_MAX.keys():
                 if len(self.LOG_data) > 0:  # otherwise we will get an error for not being able to read the log file
                     e_dict = cfg.ERROR_LIMITS_MAX[error]
-                    if self.LOG_data[e_dict['index']] < e_dict['limits'][i_quiet]:
+                    if self.LOG_data[e_dict['column']] < e_dict['limits'][i_quiet]:
                         errors_off.append(error)
-                        if self.LOG_data[e_dict['index']] < e_dict['limits'][0]:
+                        if self.LOG_data[e_dict['column']] < e_dict['limits'][0]:
                             errors_off_only_quiet.append(False)
                         else:
                             errors_off_only_quiet.append(True)
-            elif error in cfg.ERROR_NONPOSITIVE_VALUES.keys():
-                if self.LOG_data[cfg.ERROR_NONPOSITIVE_VALUES[error]['index']] > 0:
+            elif error in cfg.ERROR_LOWERTHAN_VALUES.keys():
+                c = cfg.ERROR_LOWERTHAN_VALUES[error]['column']
+                if self.LOG_data[c] > cfg.ERROR_LOWERTHAN_VALUES[c]:
                     errors_off.append(error)
                     errors_off_only_quiet.append(False)
-            elif error in cfg.ERROR_NONPOSITIVE_DEFAULT:
-                found_negative = False
-                for i in cfg.ERROR_NONPOSITIVE_INDICES:
-                    if self.LOG_data[i] <= 0:
-                        found_negative = True
-                if not found_negative:
+            elif error in cfg.ERROR_LOWERTHAN_DEFAULT:
+                found_lowerthan = False
+                for c in cfg.ERROR_LOWERTHAN:
+                    if self.LOG_data[c] <= cfg.ERROR_LOWERTHAN[c]:
+                        found_lowerthan = True
+                if not found_lowerthan:
                     errors_off.append(error)
 
         # check for new warnings
@@ -923,21 +964,21 @@ class LabBot:
 
         if len(self.LOG_data) > 0:  # otherwise we will get an error for not being able to read the log file
             for error, e_dict in cfg.ERROR_LIMITS_MAX.items():
-                if self.LOG_data[e_dict['index']] > e_dict['limits'][i_quiet]:
-                    self.error_add(error, self.LOG_data[e_dict['index']])
+                if self.LOG_data[e_dict['column']] > e_dict['limits'][i_quiet]:
+                    self.error_add(error, self.LOG_data[e_dict['column']])
 
             negative_error_default = False
-            for i in cfg.ERROR_NONPOSITIVE_INDICES:
-                if (self.LOG_data[i] <= 0):
+            for c in cfg.ERROR_LOWERTHAN:
+                if (self.LOG_data[c] <= 0):
                     found_error_code = False
-                    for error, e_dict in cfg.ERROR_NONPOSITIVE_VALUES.items():
-                        if e_dict['index'] == i and e_dict['value'] == self.LOG_data[i]:
-                            self.error_add(error, self.LOG_data[i])
+                    for error, e_dict in cfg.ERROR_LOWERTHAN_VALUES.items():
+                        if e_dict['column'] == c and e_dict['value'] == self.LOG_data[c]:
+                            self.error_add(error, self.LOG_data[c])
                             found_error_code = True
                     if not found_error_code:
                         negative_error_default = True
             if negative_error_default:
-                self.error_add(cfg.ERROR_NONPOSITIVE_DEFAULT)
+                self.error_add(cfg.ERROR_LOWERTHAN_DEFAULT)
 
         # send warnings
         self.status_error_off(self.bot, errors_off, errors_off_only_quiet)
@@ -960,7 +1001,7 @@ class LabBot:
                     if not n['active']:
                         continue
                 sign = n['comparison']
-                if sign * self.LOG_data[n['index']] > sign * n['limit']:
+                if sign * self.LOG_data[n['column']] > sign * n['limit']:
                     self.status_user_notification(bot=self.bot, update=None, chat_id=user, notification=n)
                     n_inactivate.append(i)
             # inactivate notification
