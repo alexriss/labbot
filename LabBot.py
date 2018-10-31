@@ -766,7 +766,7 @@ class LabBot:
             from_date, to_date = to_date, from_date
 
         data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
-        if data is  None:
+        if data is None:
             self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
         # filter date range
@@ -869,6 +869,8 @@ class LabBot:
 
         self.log_file = (datetime.datetime.now() - datetime.timedelta(seconds=10)).strftime(cfg.LOG_FILE)
 
+        line0 = b""
+        lines = b""
         try:
             with open(self.log_file, "rb") as fp:
                 line0 = fp.readline()
@@ -878,27 +880,30 @@ class LabBot:
         except OSError:
             logging.warning('Problem reading log file {}.'.format(self.log_file))
 
-        df = pd.read_csv(io.BytesIO(line0 + lines),
-                         sep=cfg.LOG_FILE_DELIMITER,
-                         comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
-                         parse_dates=True,
-                         date_parser=self.str2date,
-                         skiprows=[1],  # 0 are the column headers, 1 is truncated
-                         index_col=0,
-                         dtype=np.float,
-                         error_bad_lines=False)
-        log_labels = df.columns.tolist()
-        log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
+        try:
+            df = pd.read_csv(io.BytesIO(line0 + lines),
+                            sep=cfg.LOG_FILE_DELIMITER,
+                            comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                            parse_dates=True,
+                            date_parser=self.str2date,
+                            skiprows=[1],  # 0 are the column headers, 1 is truncated
+                            index_col=0,
+                            dtype=np.float,
+                            error_bad_lines=False)
+            log_labels = df.columns.tolist()
+            log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
+        except EmptyDataError:
+            logging.warning('No data found in log file {}.'.format(self.log_file))
+        finally:            
+            if df.shape[0] > 0:
+                self.LOG_labels = log_labels
+                self.LOG_labels_nice = {l: l_nice for (l, l_nice) in zip(log_labels, log_labels_nice)}
+                self.LOG_last_checked = df.tail(1).index.to_pydatetime()[0]
 
-        if df.shape[0] > 0:
-            self.LOG_labels = log_labels
-            self.LOG_labels_nice = {l: l_nice for (l, l_nice) in zip(log_labels, log_labels_nice)}
-            self.LOG_last_checked = df.tail(1).index.to_pydatetime()[0]
-
-            # make a dictionary out of the dataframe
-            self.LOG_data = df.tail(1).to_dict(orient='records')[0]
-        else:
-            logging.warning('Problem extracting fields and field labels from log file {}.'.format(self.log_file))
+                # make a dictionary out of the dataframe
+                self.LOG_data = df.tail(1).to_dict(orient='records')[0]
+            else:
+                logging.warning('Problem extracting fields and field labels from log file {}.'.format(self.log_file))
 
         self.check_sanity()
         self.check_user_notifications()
