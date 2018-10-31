@@ -630,11 +630,12 @@ class LabBot:
 
         log_data_replaced = self.replace_lowerthan(self.LOG_data)
         for c in columns:
-            val = log_data_replaced[c]
-            if isinstance(val, str):
-                str_out += "\n*{}*: {}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
-            else:
-                str_out += "\n*{}*: {:.{prec}g}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
+            if c in self.LOG_data:
+                val = log_data_replaced[c]
+                if isinstance(val, str):
+                    str_out += "\n*{}*: {}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
+                else:
+                    str_out += "\n*{}*: {:.{prec}g}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
         chat_id = self.get_chat_id(update, chat_id)
 
         bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
@@ -668,6 +669,8 @@ class LabBot:
                     if now <= self.ERRORS_checks[error][chat_id]['sendNext']:
                         continue
                 str_out = cfg.WARNING_MESSAGES[error]
+                if 'value' in self.ERRORS_checks[error][chat_id]:
+                    str_out = cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
                 if error == 'ERROR_log_read':
                     if self.LOG_last_checked:
                         str_out += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
@@ -789,7 +792,8 @@ class LabBot:
         total_count = 0
         for i, c in enumerate(columns_toplot):
             # filter non-positive values
-            axs[i, 0].set_ylabel(self.LOG_labels_nice[c])
+            if c in self.LOG_data:
+                axs[i, 0].set_ylabel(self.LOG_labels_nice[c])
             axs[i, 0].tick_params(direction='in')
             if c not in data:
                 continue
@@ -882,19 +886,19 @@ class LabBot:
 
         try:
             df = pd.read_csv(io.BytesIO(line0 + lines),
-                            sep=cfg.LOG_FILE_DELIMITER,
-                            comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
-                            parse_dates=True,
-                            date_parser=self.str2date,
-                            skiprows=[1],  # 0 are the column headers, 1 is truncated
-                            index_col=0,
-                            dtype=np.float,
-                            error_bad_lines=False)
+                             sep=cfg.LOG_FILE_DELIMITER,
+                             comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                             parse_dates=True,
+                             date_parser=self.str2date,
+                             skiprows=[1],  # 0 are the column headers, 1 is truncated
+                             index_col=0,
+                             dtype=np.float,
+                             error_bad_lines=False)
             log_labels = df.columns.tolist()
             log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
-        except EmptyDataError:
+        except pd.EmptyDataError:
             logging.warning('No data found in log file {}.'.format(self.log_file))
-        finally:            
+        finally:
             if df.shape[0] > 0:
                 self.LOG_labels = log_labels
                 self.LOG_labels_nice = {l: l_nice for (l, l_nice) in zip(log_labels, log_labels_nice)}
@@ -917,7 +921,10 @@ class LabBot:
             for user in cfg.LIST_OF_USERS:
                 if user not in self.ERRORS_checks[error].keys():
                     self.ERRORS_checks[error][user] = {
-                        'sendNext': now - datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES), 'timesSent': 0}
+                        'sendNext': now - datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES),
+                        'timesSent': 0,
+                        'value': value
+                    }
 
         write_log = False
         if error not in self.LOGGING_last_write.keys():
@@ -966,25 +973,33 @@ class LabBot:
                     if now - self.LOG_last_checked < datetime.timedelta(minutes=cfg.WARNING_NOLOG_MINUTES):
                         errors_off.append(error)
                         errors_off_only_quiet.append(False)
+            elif error in cfg.ERROR_COLUMNS_MUSTHAVE.keys():
+                e_dict = cfg.ERROR_COLUMNS_MUSTHAVE[error]
+                if e_dict['column'] in self.LOG_data:
+                    errors_off.append(error)
+                    errors_off_only_quiet.append(False)
             elif error in cfg.ERROR_LIMITS_MAX.keys():
                 if len(self.LOG_data) > 0:  # otherwise we will get an error for not being able to read the log file
                     e_dict = cfg.ERROR_LIMITS_MAX[error]
-                    if self.LOG_data[e_dict['column']] < e_dict['limits'][i_quiet]:
-                        errors_off.append(error)
-                        if self.LOG_data[e_dict['column']] < e_dict['limits'][0]:
-                            errors_off_only_quiet.append(False)
-                        else:
-                            errors_off_only_quiet.append(True)
+                    if e_dict['column'] in self.LOG_data:
+                        if self.LOG_data[e_dict['column']] < e_dict['limits'][i_quiet]:
+                            errors_off.append(error)
+                            if self.LOG_data[e_dict['column']] < e_dict['limits'][0]:
+                                errors_off_only_quiet.append(False)
+                            else:
+                                errors_off_only_quiet.append(True)
             elif error in cfg.ERROR_LOWERTHAN_VALUES.keys():
                 c = cfg.ERROR_LOWERTHAN_VALUES[error]['column']
-                if self.LOG_data[c] > cfg.ERROR_LOWERTHAN_VALUES[c]:
-                    errors_off.append(error)
-                    errors_off_only_quiet.append(False)
+                if c in self.LOG_data:
+                    if self.LOG_data[c] > cfg.ERROR_LOWERTHAN_VALUES[c]:
+                        errors_off.append(error)
+                        errors_off_only_quiet.append(False)
             elif error in cfg.ERROR_LOWERTHAN_DEFAULT:
                 found_lowerthan = False
                 for c in cfg.ERROR_LOWERTHAN:
-                    if self.LOG_data[c] <= cfg.ERROR_LOWERTHAN[c]:
-                        found_lowerthan = True
+                    if c in self.LOG_data:
+                        if self.LOG_data[c] <= cfg.ERROR_LOWERTHAN[c]:
+                            found_lowerthan = True
                 if not found_lowerthan:
                     errors_off.append(error)
 
@@ -994,21 +1009,27 @@ class LabBot:
         elif now - self.LOG_last_checked > datetime.timedelta(minutes=cfg.WARNING_NOLOG_MINUTES):
             self.error_add('ERROR_log_read', self.LOG_last_checked)
 
+        for error, e_dict in cfg.ERROR_COLUMNS_MUSTHAVE.items():
+            if e_dict['column'] not in self.LOG_data:
+                self.error_add(error)
+
         if len(self.LOG_data) > 0:  # otherwise we will get an error for not being able to read the log file
             for error, e_dict in cfg.ERROR_LIMITS_MAX.items():
-                if self.LOG_data[e_dict['column']] > e_dict['limits'][i_quiet]:
-                    self.error_add(error, self.LOG_data[e_dict['column']])
+                if e_dict['column'] in self.LOG_data:
+                    if self.LOG_data[e_dict['column']] > e_dict['limits'][i_quiet]:
+                        self.error_add(error, self.LOG_data[e_dict['column']])
 
             negative_error_default = False
             for c in cfg.ERROR_LOWERTHAN:
-                if (self.LOG_data[c] <= 0):
-                    found_error_code = False
-                    for error, e_dict in cfg.ERROR_LOWERTHAN_VALUES.items():
-                        if e_dict['column'] == c and e_dict['value'] == self.LOG_data[c]:
-                            self.error_add(error, self.LOG_data[c])
-                            found_error_code = True
-                    if not found_error_code:
-                        negative_error_default = True
+                if c in self.LOG_data:
+                    if (self.LOG_data[c] <= 0):
+                        found_error_code = False
+                        for error, e_dict in cfg.ERROR_LOWERTHAN_VALUES.items():
+                            if e_dict['column'] == c and e_dict['value'] == self.LOG_data[c]:
+                                self.error_add(error, self.LOG_data[c])
+                                found_error_code = True
+                        if not found_error_code:
+                            negative_error_default = True
             if negative_error_default:
                 self.error_add(cfg.ERROR_LOWERTHAN_DEFAULT)
 
@@ -1033,9 +1054,10 @@ class LabBot:
                     if not n['active']:
                         continue
                 sign = n['comparison']
-                if sign * self.LOG_data[n['column']] > sign * n['limit']:
-                    self.status_user_notification(bot=self.bot, update=None, chat_id=user, notification=n)
-                    n_inactivate.append(i)
+                if n['column'] in self.LOG_data:
+                    if sign * self.LOG_data[n['column']] > sign * n['limit']:
+                        self.status_user_notification(bot=self.bot, update=None, chat_id=user, notification=n)
+                        n_inactivate.append(i)
             # inactivate notification
             for i in n_inactivate:  # if we want to delete them, we need to use reversed(n_inactivate)
                 self.USER_config[user]['notifications'][i]['active'] = False

@@ -58,7 +58,7 @@ ERROR_COLUMNS_MUSTHAVE = {
     "ERROR_nolog_pressure_afm": {"column": "AFM[mbar]"},
     "ERROR_nolog_pressure_prep": {"column": "PREP[mbar]"},
     "ERROR_nolog_pressure_roughing": {"column": "ROU[mbar]"},
-    "ERROR_nolog_pressure_temperature_afm": {"column": "TAFM[K]"},
+    "ERROR_nolog_temperature_afm": {"column": "TAFM[K]"},
 }
 
 
@@ -73,7 +73,7 @@ ERROR_LIMITS_MAX = {
     # maximum temperature for the AFM temperature diode reading
     "ERROR_temperature_afm": {"column": "TAFM[K]", "limits": [18.0, 20.0]},
     # maximum temperature for the cryo temperature diode reading
-    "ERROR_temperature_cryo": {"column": "TCRY[K]", "limits": [5.0, 6.0]},
+    "ERROR_temperature_cryo": {"column": "TCRY[K]", "limits": [7.0, 7.0]},
 }
 
 # nonpositive values can encode error codes, if values smaller than the given value are detected, errors are raised
