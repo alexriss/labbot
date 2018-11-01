@@ -166,7 +166,7 @@ WARNING_MESSAGES = {
     "ERROR_lowerthan_pressure_roughing_iderror": u"\u26A0" + " *WARNING: *\nRoughing pressure sensor id error.",
     "ERROR_lowerthan_temperature_afm_notfound": u"\u26A0" + " *WARNING: *\nAFM temperature not detected.",
     "ERROR_lowerthan_temperature_cryo_notfound": u"\u26A0" + " *WARNING: *\nCryo temperature not detected.",
-    "ERROR_lowerthan": u"\u26A0" + " *WARNING: *\Sensor values below normal limits observed ({}).",
+    "ERROR_lowerthan": u"\u26A0" + " *WARNING: *\nSensor values below normal limits observed ({}).",
 }
 
 WARNING_NAMES = {
