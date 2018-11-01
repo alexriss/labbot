@@ -838,7 +838,7 @@ class LabBot:
 
         datas = []
         this_date = from_date
-        while this_date <= to_date:
+        while this_date <= to_date + datetime.timedelta(days=cfg.LOG_FILE_EVERY_DAYS):
             log_file = this_date.strftime(cfg.LOG_FILE)
             try:
                 # we can use skiprows here, but I found that it doesn't really speed up things; so we do the rolling mean in the next line
