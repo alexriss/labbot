@@ -468,8 +468,8 @@ class LabBot:
 
         if len(args) == 0:
             bot.send_message(chat_id=chat_id, text='Please specify which notification you want to setup,'
-                             + '\ne.g. "/n temp < 8".\nAlso you can use "/n list" to list notifications'
-                             + ' and "/n del n" to delete a specific notification.\n\n{}'.format(
+                             '\ne.g. "/n temp < 8".\nAlso you can use "/n list" to list notifications'
+                             ' and "/n del n" to delete a specific notification.\n\n{}'.format(
                                  self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
@@ -837,8 +837,10 @@ class LabBot:
             num_days = cfg.GRAPH_DAYS_MAX
 
         datas = []
+        # we need to adjust the to_date to get all logs
+        to_date_adjusted = to_date + datetime.timedelta(days=cfg.LOG_FILE_EVERY_DAYS)
         this_date = from_date
-        while this_date <= to_date + datetime.timedelta(days=cfg.LOG_FILE_EVERY_DAYS):
+        while this_date <= to_date_adjusted:
             log_file = this_date.strftime(cfg.LOG_FILE)
             try:
                 # we can use skiprows here, but I found that it doesn't really speed up things; so we do the rolling mean in the next line
