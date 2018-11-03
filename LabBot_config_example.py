@@ -6,13 +6,26 @@ BOT_ID = "<id>"
 BOT_TOKEN = "<token>"
 
 # Log file, column delimiter and date format (first column is the date-time information)
-LOG_FILE = "/network/logs/log-%Y-%m-%d.log"
+LOG_FILE = "/mnt/tum-nas/AFM/_data/pressure_log/pressure-logs/pressure-AFM-%Y-%m-%d.log"
 LOG_FILE_EVERY_DAYS = 1  # the log filename is changed every n days, 1 for daily logs
 LOG_FILE_DELIMITER = "\t"
 LOG_FILE_DELIMITER_COMMENT_SYMBOL = "#"
 DATE_FMT_LOG = "%Y-%m-%d_%H:%M:%S"  # format of first column (date-time) in the log
 
-READ_LOG_EVERY_SECONDS = 60  # read log and do sanity checks every n seconds
+# some thigns are only measured when commands are given, i.e. "/measure helium"
+# the bot then creates the file 'measure_file', which signals the logger to do a measurement
+# and append the new measurement to 'log_file'
+# if no new entries are seen in the log file for 'timeout' minutes, then a timeout message will be sent.
+MEASURE_REQUESTS = {
+    "helium": {
+        "column": "Helium[mm]",
+        "log_file": "/mnt/tum-nas/AFM/_data/pressure_log/pressure-logs/helium-AFM-%Y.log",
+        "measure_file": "/mnt/tum-nas/AFM/_data/pressure_log/pressure-logs/measure-helium-AFM",
+        "timeout": 2
+    }
+}
+
+READ_LOG_EVERY_SECONDS = 30  # read log and do sanity checks every n seconds
 WARNING_NOLOG_MINUTES = 5   # if there are no logs for this amount of minutes, send warning
 WARNING_SEND_EVERY_MINUTES = 60  # send warning every n number of minutes (if it still persists)
 
@@ -22,7 +35,7 @@ DATE_FMT_BOT_SHORT_HOURS = 6  # use short date format if less than n hours have 
 DATE_FMT_BOT_SHORT = ("%H:%M:%S")  # use short date format if less than DATE_FMT_BOT_SHORT_HOURS hours have elapsed
 
 # if a typed command is below this length, if will be handled as a strict command
-# this means that "n" will work, but not "nasdf"
+# this means that for instance "n" will work, but not "nasdf"
 # for longer commands "statusadasf" will be recognized
 MESSAGE_COMMANDS_STRICT_MAXLENGTH = 3
 
@@ -42,6 +55,7 @@ COLUMNS_LABELS = {
     "TAFM[K]": ["tafm", "afm", "temp", "t", "afmtemperature", "afmt", "temperatureafm", "afmtemp", "tempafm"],
     "TCRY[K]": ["tcryo", "tempcryo", "tc", "cryotemperature", "cryot", "temperaturecryo", "cryotemp", "cryo", "tcry"],
     "TSAM[C]": ["tsample", "tsam", "tempsample", "ts", "sampletemperature", "samplet", "temperaturesample", "sampletemp", "sample"],
+    "Helium[mm]": ["helium", "he"],
 }
 
 # these values will be rpelaced by text in the status messages (such values encode errors)

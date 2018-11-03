@@ -47,7 +47,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.13
+        self.__version__ = 0.14
 
         self.LOG_last_checked = None   # date and time of when the log was last checked
         self.LOG_data = {}             # data of one log line, keys are labels
@@ -57,6 +57,8 @@ class LabBot:
         self.ERRORS_checks = {}
         self.LOGGING_last_write = {}   # dictionary of errors, keys are the error strings and values contain timestamp of last written log
         self.USER_config = {}          # dictionary of user id with config data
+
+        self.MEASURE_requests = {}     # dictionary containing entities to measure on command, keys are the entity
 
         self.logging_filename = ""
         self.check_logging_file(force=True)
@@ -178,6 +180,7 @@ class LabBot:
         self.dispatcher.add_handler(CommandHandler(
             ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_sensors, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['bakeout'], self.status_bakeout))
+        self.dispatcher.add_handler(CommandHandler(['measure'], self.measure_handler, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['photo', 'pic'], self.status_photo))
 
         self.dispatcher.add_handler(MessageHandler(Filters.command, self.unknown_command_handler))
@@ -336,6 +339,31 @@ class LabBot:
                 log_data[c] = cfg.VALUES_REPLACE[val]
         return log_data
 
+    def date_format_bot(self, this_date):
+        """returns a formatted date according to the config"""
+        if datetime.datetime.now() - this_date < datetime.timedelta(hours=cfg.DATE_FMT_BOT_SHORT_HOURS):
+            return this_date.strftime(cfg.DATE_FMT_BOT_SHORT)
+        else:
+            return this_date.strftime(cfg.DATE_FMT_BOT)
+
+    def get_first_last_from_file(self, fname, maxLineLength=120, default=b""):
+        """Reads header line and last few lines from a file, returns the bytes"""
+        firstlast = default
+        try:
+            with open(fname, "rb") as fp:
+                line0 = fp.readline()
+                # get file length
+                fp.seek(0, 2)
+                size = fp.tell()
+                bytelength = maxLineLength * 22
+                bytelength = min(size, bytelength)
+                fp.seek(-bytelength, 2)  # 2 means "from the end of the file"
+                lines = fp.read(bytelength)
+                firstlast = line0 + lines
+        except OSError:
+            logging.warning('Problem reading log file {}.'.format(fname))
+        return firstlast
+
     @restricted
     @send_action(ChatAction.TYPING)
     def hello_handler(self, bot, update, args=[], chat_id=0):
@@ -362,11 +390,76 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
+    def measure_handler(self, bot, update, args, chat_id=0):
+        """send measure commands via a text file"""
+        now = datetime.datetime.now()
+        chat_id = self.get_chat_id(update, chat_id)
+
+        if len(args) != 1 or args[0].lower() not in cfg.MEASURE_REQUESTS:
+            str_out = "I don't know what to measure."
+            logging.info("Measure request ({}) by {} unsuccessful.".format(args, chat_id))
+            bot.send_message(chat_id=chat_id, text=str_out, reply_markup=self.reply_markup)
+            return False
+
+        entity = args[0].lower()
+        m_dict = cfg.MEASURE_REQUESTS[entity]
+        data = self.measure_getlast(entity)
+        if data is not None and data.shape[0] > 0:
+            date_last_measured = data.tail(1).index.to_pydatetime()[0]
+        else:
+            date_last_measured = now - datetime.timedelta(days=365)
+
+        # create measure file
+        measure_file = now.strftime(m_dict['measure_file'])
+        with open(measure_file, 'a'):
+            os.utime(measure_file)
+        if entity not in self.MEASURE_requests:
+            self.MEASURE_requests[entity] = {}
+        self.MEASURE_requests[entity]['last_measured'] = date_last_measured
+        self.MEASURE_requests[entity]['requested'] = now
+        self.MEASURE_requests[entity]['active'] = True
+        if 'chat_ids' not in self.MEASURE_requests[entity]:
+            self.MEASURE_requests[entity]['chat_ids'] = set()
+        self.MEASURE_requests[entity]['chat_ids'].add(chat_id)
+
+        str_out = "Sent request to measure *{}*.".format(entity)
+        logging.info("Measure request ({}) by {}.".format(entity, chat_id))
+        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+
+    @restricted
+    @send_action(ChatAction.TYPING)
+    def measure_send_result(self, bot, update, args=[], chat_id=0):
+        """send result of the measurement to the user"""
+        chat_id = self.get_chat_id(update, chat_id)
+        self.bot.send_message(chat_id=chat_id, text=args[0], parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+
+    def measure_getlast(self, entity):
+        """reads last log entries for a specific measure entity"""
+        now = datetime.datetime.now()
+        log_file = now.strftime(cfg.MEASURE_REQUESTS[entity]['log_file'])
+        selected_lines = self.get_first_last_from_file(log_file)
+
+        df = pd.DataFrame()
+        try:
+            df = pd.read_csv(io.BytesIO(selected_lines),
+                             sep=cfg.LOG_FILE_DELIMITER,
+                             comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
+                             parse_dates=True,
+                             date_parser=self.str2date,
+                             skiprows=[1],  # 0 are the column headers, 1 is truncated
+                             index_col=0,
+                             dtype=np.float,
+                             error_bad_lines=False)
+        except pd.errors.EmptyDataError:
+            logging.warning('No data found in log file {}.'.format(log_file))
+            return None
+        return df[-1:]
+
+    @restricted
+    @send_action(ChatAction.TYPING)
     def silence_errors(self, bot, update, args, chat_id=0):
         """silence current warnings for the specified amount of hours"""
-
         now = datetime.datetime.now()
-
         chat_id = self.get_chat_id(update, chat_id)
 
         s_hours = args[0]
@@ -389,6 +482,8 @@ class LabBot:
 
         if hours == 0:
             str_out = 'All warning messages re-enabled.'
+        elif len(list_disabled) == 0:
+            str_out = 'There are no active warning messages to disable.'
         else:
             str_error_names = ", ".join([cfg.WARNING_NAMES[e] for e in list_disabled])
             str_out = 'Active warning messages ({}) disabled for {} hours.'.format(str_error_names, hours)
@@ -604,10 +699,7 @@ class LabBot:
     def status_sensors(self, bot, update, args=[], chat_id=0, error_str=""):
         str_out = error_str
         if self.LOG_last_checked:
-            if datetime.datetime.now() - self.LOG_last_checked < datetime.timedelta(hours=cfg.DATE_FMT_BOT_SHORT_HOURS):
-                str_out += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT_SHORT) + "*"
-            else:
-                str_out += "*" + self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + "*"
+            str_out += "*{}*".format(self.date_format_bot(self.LOG_last_checked))
         if self.quiet_hours():
             str_out += ' _(quiet hours)_'
 
@@ -618,6 +710,9 @@ class LabBot:
         columns = []
         if 'all' in query_items:  # display data for all sensors
             columns = self.LOG_labels
+            # add columns from measure requests as well
+            for entity, cm_dict in cfg.MEASURE_REQUESTS.items():
+                columns.append(cm_dict['column'])
         else:
             for q in query_items:
                 c = self.get_column_name(q)
@@ -633,11 +728,31 @@ class LabBot:
             if c in self.LOG_data:
                 val = log_data_replaced[c]
                 if isinstance(val, str):
-                    str_out += "\n*{}*: {}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
+                    str_out += "\n*{}*: {}".format(self.LOG_labels_nice[c], val)
                 else:
                     str_out += "\n*{}*: {:.{prec}g}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
-        chat_id = self.get_chat_id(update, chat_id)
+            else:
+                # check the message requests - here we need to read the log file
+                for entity, cm_dict in cfg.MEASURE_REQUESTS.items():
+                    if c == cm_dict['column']:
+                        data = self.measure_getlast(entity)
+                        if data is not None and data.shape[0] > 0:
+                            date_last_measured = data.tail(1).index.to_pydatetime()[0]
+                            # if date_last_measured <= m_dict['last_measured']:
+                            #     continue  # no new values in the file yet
+                            column_name = cfg.MEASURE_REQUESTS[entity]['column']
+                            if column_name not in data:
+                                logging.info("Status for {}: Column {} not found in log file.".format(entity, column_name))
+                                continue
+                            value = data.tail(1)[column_name]
+                            column_name_nice = cfg.LOG_NAMES_REPLACEMENT(column_name)
+                            str_out += "\n*{}*: {}  _({})_".format(
+                                column_name_nice,
+                                self.replace_lowerthan(value).item(),
+                                self.date_format_bot(date_last_measured)
+                            )
 
+        chat_id = self.get_chat_id(update, chat_id)
         bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
         logging.info('Status sent to {}'.format(chat_id))
@@ -875,19 +990,9 @@ class LabBot:
 
         self.log_file = (datetime.datetime.now() - datetime.timedelta(seconds=10)).strftime(cfg.LOG_FILE)
 
-        line0 = b""
-        lines = b""
+        selected_lines = self.get_first_last_from_file(self.log_file, maxLineLength=maxLineLength, default=b"")
         try:
-            with open(self.log_file, "rb") as fp:
-                line0 = fp.readline()
-                bytelength = maxLineLength * 22
-                fp.seek(-bytelength, 2)  # 2 means "from the end of the file"
-                lines = fp.read(bytelength)
-        except OSError:
-            logging.warning('Problem reading log file {}.'.format(self.log_file))
-
-        try:
-            df = pd.read_csv(io.BytesIO(line0 + lines),
+            df = pd.read_csv(io.BytesIO(selected_lines),
                              sep=cfg.LOG_FILE_DELIMITER,
                              comment=cfg.LOG_FILE_DELIMITER_COMMENT_SYMBOL,
                              parse_dates=True,
@@ -898,7 +1003,7 @@ class LabBot:
                              error_bad_lines=False)
             log_labels = df.columns.tolist()
             log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
-        except pd.EmptyDataError:
+        except pd.errors.EmptyDataError:
             logging.warning('No data found in log file {}.'.format(self.log_file))
         finally:
             if df.shape[0] > 0:
@@ -913,6 +1018,7 @@ class LabBot:
 
         self.check_sanity()
         self.check_user_notifications()
+        self.check_measure_requests()
         self.check_logging_file()
 
     def error_add(self, error, value=""):
@@ -968,7 +1074,8 @@ class LabBot:
 
         # check for warnings that are not active anymore
         errors_off = []
-        errors_off_only_quiet = []
+        errors_off_only_quiet = []   # boolean values, same length as errors_off
+        errors_unknown = []
         for error in self.ERRORS_checks.keys():
             if error == 'ERROR_log_read':
                 if self.LOG_last_checked:
@@ -1004,6 +1111,12 @@ class LabBot:
                             found_lowerthan = True
                 if not found_lowerthan:
                     errors_off.append(error)
+            else:
+                errors_unknown.append(error)
+
+        # delete unknown errors, they have probably been removed from the config
+        for error in errors_unknown:
+            self.error_remove(error)
 
         # check for new warnings
         if not self.LOG_last_checked:
@@ -1066,8 +1179,48 @@ class LabBot:
             if len(n_inactivate) > 0:
                 self.save_config = True
 
+    def check_measure_requests(self):
+        """checks if measure requests have received responses"""
+        now = datetime.datetime.now()
+        for entity, m_dict in self.MEASURE_requests.items():
+            if not m_dict['active']:
+                continue
+            data = self.measure_getlast(entity)
+            if data is not None and data.shape[0] > 0:
+                date_measured = data.tail(1).index.to_pydatetime()[0]
+                if date_measured > m_dict['last_measured']:
+                    column_name = cfg.MEASURE_REQUESTS[entity]['column']
+                    if column_name in data:
+                        value = data.tail(1)[column_name]
+                        column_name_nice = cfg.LOG_NAMES_REPLACEMENT(column_name)
+                        chat_ids = self.MEASURE_requests[entity]['chat_ids']
+                        self.MEASURE_requests[entity]['chat_ids'] = set()
+                        self.MEASURE_requests[entity]['active'] = False
+                        self.MEASURE_requests[entity]['last_measured'] = date_measured
+                        self.MEASURE_requests[entity]['value'] = value
+                        str_out = "*{}*: {}  _({})_".format(
+                            column_name_nice,
+                            self.replace_lowerthan(value).item(),
+                            self.date_format_bot(date_measured)
+                        )
+                        for chat_id in chat_ids:
+                            logging.info("Measure request ({}) by {} successful: {}".format(
+                                entity, chat_id,
+                                self.replace_lowerthan(value).item())
+                            )
+                            self.measure_send_result(self.bot, update=None, args=[str_out], chat_id=chat_id)
+                        continue
+                    else:
+                        logging.info("Measure request for {}: Column {} not found in log file.".format(entity, column_name))
+            if now - m_dict['requested'] > datetime.timedelta(minutes=cfg.MEASURE_REQUESTS[entity]['timeout']):
+                self.MEASURE_requests[entity]['active'] = False
+                str_out = "Request to measure *{}* timed out.".format(entity)
+                for chat_id in m_dict['chat_ids']:
+                    logging.info("Measure request ({}) by {} timed out.".format(entity, chat_id))
+                    self.measure_send_result(self.bot, update=None, args=[str_out], chat_id=chat_id)
+
     def check_logging_file(self, force=False):
-        """checks whether the filehands for logging should be updated"""
+        """checks whether the filehandle for logging should be updated"""
         now = datetime.datetime.now()
         fname = now.strftime(cfg.LOGGING_FILENAME)
         if force or fname != self.logging_filename:
