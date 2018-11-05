@@ -4,7 +4,7 @@
 # This bot will check the data logs and send warnings to the users in LIST_OF_USERS in case of any problems.
 # Such problems include pressures or temperatures getting too high. Also if there are no recent logs available,
 # which can happen in case of a power outage.
-
+#
 # Furthermore, the bot can respond to request and send the actual pressure and temperature status.
 # Also it can generate graphs with specific date ranges.
 # A user notification system is available.
@@ -16,7 +16,6 @@
 #   - better comments and documentation
 #   - unit tests
 #   - bakeout control and sending of webcam photos
-#   - inlinehandlers
 #   - friendly and hostile modes for random text messages
 
 
@@ -36,10 +35,11 @@ import pickle
 import random
 import re
 import sys
+import threading
+import traceback
 import telegram
 from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler, BaseFilter, Filters
 from telegram import ChatAction
-import threading
 
 # import configuration
 import LabBot_config as cfg
@@ -49,16 +49,17 @@ class LabBot:
     def __init__(self):
         self.__version__ = 0.14
 
-        self.LOG_last_checked = None   # date and time of when the log was last checked
-        self.LOG_data = {}             # data of one log line, keys are labels
-        self.LOG_labels = []           # labels for log data
-        self.LOG_labels_nice = {}      # labels for log data with string replacements (keys are the LOG_labels)
+        self.LOG_last_checked = None     # date and time of when the log was last checked
+        self.LOG_data = {}               # data of one log line, keys are labels
+        self.LOG_labels = []             # labels for log data
+        self.LOG_labels_nice = {}        # labels for log data with string replacements (keys are the LOG_labels)
         # list of users with dictionary of errors, keys are the error strings and values contain extra error information
         self.ERRORS_checks = {}
-        self.LOGGING_last_write = {}   # dictionary of errors, keys are the error strings and values contain timestamp of last written log
-        self.USER_config = {}          # dictionary of user id with config data
+        # dictionary of errors, keys are the error strings and values contain timestamp of last written log
+        self.LOGGING_last_write = {}
+        self.USER_config = {}            # dictionary of user id with config data
 
-        self.MEASURE_requests = {}     # dictionary containing entities to measure on command, keys are the entity
+        self.MEASURE_requests = {}       # dictionary containing entities to measure on command, keys are the entity
 
         self.logging_filename = ""
         self.check_logging_file(force=True)
@@ -333,10 +334,12 @@ class LabBot:
         return default
 
     def replace_lowerthan(self, log_data):
-        """replaces negative values with error codes"""
+        """replaces negative values with error codes; also replace nan values"""
         for c, val in log_data.items():
             if val in cfg.VALUES_REPLACE.keys():
                 log_data[c] = cfg.VALUES_REPLACE[val]
+            elif val != val and 'nan' in cfg.VALUES_REPLACE:  # nan
+                log_data[c] = cfg.VALUES_REPLACE['nan']
         return log_data
 
     def date_format_bot(self, this_date):
@@ -431,7 +434,10 @@ class LabBot:
     def measure_send_result(self, bot, update, args=[], chat_id=0):
         """send result of the measurement to the user"""
         chat_id = self.get_chat_id(update, chat_id)
-        self.bot.send_message(chat_id=chat_id, text=args[0], parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+        self.bot.send_message(
+            chat_id=chat_id, text=args[0],
+            parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup
+        )
 
     def measure_getlast(self, entity):
         """reads last log entries for a specific measure entity"""
@@ -585,10 +591,16 @@ class LabBot:
         for action_key, action_dict in action_dicts.items():
             if args[0] in action_dict['keywords']:
                 if len(args) <= 1:
-                    bot.send_message(chat_id=chat_id, text='Please specify which notification to {}, e.g. "n {} 2"'.format(
-                        action_dict['str_todo'], action_dict['keywords'][0]), parse_mode=telegram.ParseMode.MARKDOWN)
+                    bot.send_message(
+                        chat_id=chat_id, text='Please specify which notification to {}, e.g. "n {} 2"'.format(
+                            action_dict['str_todo'], action_dict['keywords'][0]
+                        ), parse_mode=telegram.ParseMode.MARKDOWN
+                    )
                     logging.info(
-                        'Notification-{} for {} failed due to wrong format ({}).'.format(action_dict['str_name'], chat_id, " ".join(args)))
+                        'Notification-{} for {} failed due to wrong format ({}).'.format(
+                            action_dict['str_name'], chat_id, " ".join(args)
+                        )
+                    )
                     return False
                 num_changed = self.notification_change(chat_id, args[1:], action_key)
 
@@ -597,7 +609,9 @@ class LabBot:
                     str_plural = 's'
 
                 bot.send_message(chat_id=chat_id, text='{:d} notification{} {}.\n\n{}'.format(
-                    num_changed, str_plural, action_dict['str_done'], self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN)
+                    num_changed, str_plural, action_dict['str_done'],
+                    self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN
+                )
                 logging.info('Notifications {} for user {}: {:d}.'.format(
                     action_dict['str_done'], chat_id, num_changed))
                 return True
@@ -618,8 +632,11 @@ class LabBot:
         column = self.get_column_name(query_items[0])
         if not column:
             str_out = ", ".join([val[0] for val in cfg.COLUMNS_LABELS.values()])
-            bot.send_message(chat_id=chat_id, text='I do not recognize the first element. It should be one of:\n{}'.format(
-                str_out), parse_mode=telegram.ParseMode.MARKDOWN)
+            bot.send_message(
+                chat_id=chat_id,
+                text='I do not recognize the first element. It should be one of:\n{}'.format(str_out),
+                parse_mode=telegram.ParseMode.MARKDOWN
+            )
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
 
@@ -629,16 +646,20 @@ class LabBot:
         elif query_items[1] in ['<', 's', 'lt', 'l', 'k', 'kl']:
             comparison = -1
         if comparison == 0:  # the query_item was neither "<" nor ">"
-            bot.send_message(chat_id=chat_id, text='The second element of the notification should be either "<" or ">",\n e.g. "temp < 8".',
-                             parse_mode=telegram.ParseMode.MARKDOWN)
+            bot.send_message(
+                chat_id=chat_id,
+                text='The second element of the notification should be either "<" or ">",\n e.g. "temp < 8".',
+                parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
 
         try:
             limit = float(query_items[2].lower().replace('k', '').replace('mbar', ''))  # remove units
         except ValueError:
-            bot.send_message(chat_id=chat_id, text='The third element of the notification should be a number,\n e.g. "temp < 8".',
-                             parse_mode=telegram.ParseMode.MARKDOWN)
+            bot.send_message(
+                chat_id=chat_id,
+                text='The third element of the notification should be a number,\n e.g. "temp < 8".',
+                parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
 
@@ -680,7 +701,8 @@ class LabBot:
         str_out += '*Graphs* can be plotted using the "graph" keyword or "/graph" and "/g" commands. '
         str_out += 'Extra parameters are possible to specify _from_ and _to_ dates.\n'
         str_out += 'Try: "/g -3d" or "g -12h -10h"\n\n'
-        str_out += 'The graph and status commands both support extra arguments specifying the sensor data that should be plotted.\n'
+        str_out += 'The graph and status commands both support extra arguments'
+        str_out += 'specifying the sensor data that should be plotted.\n'
         str_out += '"g afm prep tafm" or "s all".\n\n'
         str_out += '*User notifications* can be set up using:\n'
         str_out += '/n afm < 1e-10\n'
@@ -742,7 +764,9 @@ class LabBot:
                             #     continue  # no new values in the file yet
                             column_name = cfg.MEASURE_REQUESTS[entity]['column']
                             if column_name not in data:
-                                logging.info("Status for {}: Column {} not found in log file.".format(entity, column_name))
+                                logging.info(
+                                    "Status for {}: Column {} not found in log file.".format(entity, column_name)
+                                )
                                 continue
                             value = data.tail(1)[column_name]
                             column_name_nice = cfg.LOG_NAMES_REPLACEMENT(column_name)
@@ -870,15 +894,22 @@ class LabBot:
         # parse args
         if len(args) >= 1:
             try:
-                # dm gives UTC timezone, so first we convert to local timezon and then remove the timezon info (so we can compare with the logged entries)
+                # dm gives UTC timezone, so first we convert to local timezone and then
+                # remove the timezon info (so we can compare with the logged entries)
                 from_date = datemath.dm(args[0], type='datetime').astimezone().replace(tzinfo=None)
-            except:
-                pass
+            except datemath.helpers.DateMathException:
+                logging.error('Error when converting {} to datetime.'.format(args[0]))
+            except Exception:
+                logging.error('Error when converting {} to datetime.'.format(args[0]))
+                logging.error(traceback.format_exc())
         if len(args) >= 2:
             try:
                 to_date = datemath.dm(args[1], type='datetime').astimezone().replace(tzinfo=None)
-            except:
-                pass
+            except datemath.helpers.DateMathException:
+                logging.error('Error when converting {} to datetime.'.format(args[0]))
+            except Exception:
+                logging.error('Error when converting {} to datetime.'.format(args[1]))
+                logging.error(traceback.format_exc())
 
         if from_date > to_date:
             from_date, to_date = to_date, from_date
@@ -889,14 +920,18 @@ class LabBot:
             return False
         # filter date range
         # data = data[from_date:to_date]
-        # the slicing causes problems for nonmonotonous data, which can happen when DST ends or when the log files are weird
+        # the slicing causes problems for nonmonotonous data,
+        # which can happen when DST ends or when the log files are non-monotonous
         data = data[(data.index > from_date) & (data.index < to_date)]
 
         if not data.shape[0]:
             self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
 
-        fig, axs = plt.subplots(len(columns_toplot), 1, sharex=True, squeeze=False, figsize=(8, 0.5 + 2 * len(columns_toplot)))
+        fig, axs = plt.subplots(
+            len(columns_toplot), 1, sharex=True,
+            squeeze=False, figsize=(8, 0.5 + 2 * len(columns_toplot))
+        )
 
         # get colors for columns
         colors = {}
@@ -1103,7 +1138,7 @@ class LabBot:
                     if self.LOG_data[c] > cfg.ERROR_LOWERTHAN_VALUES[c]:
                         errors_off.append(error)
                         errors_off_only_quiet.append(False)
-            elif error in cfg.ERROR_LOWERTHAN_DEFAULT:
+            elif error == cfg.ERROR_LOWERTHAN_DEFAULT:
                 found_lowerthan = False
                 for c in cfg.ERROR_LOWERTHAN:
                     if c in self.LOG_data:
@@ -1111,6 +1146,11 @@ class LabBot:
                             found_lowerthan = True
                 if not found_lowerthan:
                     errors_off.append(error)
+                    errors_off_only_quiet.append(False)
+            elif error == cfg.ERROR_UNKNOWN_VALUES:
+                if not any(np.isnan(val) for val in self.LOG_data.values()):
+                    errors_off.append(error)
+                    errors_off_only_quiet.append(False)
             else:
                 errors_unknown.append(error)
 
@@ -1135,6 +1175,7 @@ class LabBot:
                         self.error_add(error, self.LOG_data[e_dict['column']])
 
             negative_error_default = False
+            negative_error_columns = []
             for c in cfg.ERROR_LOWERTHAN:
                 if c in self.LOG_data:
                     if (self.LOG_data[c] <= 0):
@@ -1144,9 +1185,17 @@ class LabBot:
                                 self.error_add(error, self.LOG_data[c])
                                 found_error_code = True
                         if not found_error_code:
+                            negative_error_columns.append(c)
                             negative_error_default = True
             if negative_error_default:
-                self.error_add(cfg.ERROR_LOWERTHAN_DEFAULT)
+                columns_nice = [self.LOG_labels_nice[c] for c in negative_error_columns]
+                str_columns = ", ".join(columns_nice)
+                self.error_add(cfg.ERROR_LOWERTHAN_DEFAULT, str_columns)
+
+            if any(np.isnan(val) for val in self.LOG_data.values()):
+                columns_nice = [self.LOG_labels_nice[c] for c in self.LOG_data if np.isnan(self.LOG_data[c])]
+                str_columns = ", ".join(columns_nice)
+                self.error_add(cfg.ERROR_UNKNOWN_VALUES, str_columns)
 
         # send warnings
         self.status_error_off(self.bot, errors_off, errors_off_only_quiet)
@@ -1211,7 +1260,9 @@ class LabBot:
                             self.measure_send_result(self.bot, update=None, args=[str_out], chat_id=chat_id)
                         continue
                     else:
-                        logging.info("Measure request for {}: Column {} not found in log file.".format(entity, column_name))
+                        logging.info(
+                            "Measure request for {}: Column {} not found in log file.".format(entity, column_name)
+                        )
             if now - m_dict['requested'] > datetime.timedelta(minutes=cfg.MEASURE_REQUESTS[entity]['timeout']):
                 self.MEASURE_requests[entity]['active'] = False
                 str_out = "Request to measure *{}* timed out.".format(entity)
