@@ -1135,9 +1135,14 @@ class LabBot:
             elif error in cfg.ERROR_LOWERTHAN_VALUES.keys():
                 c = cfg.ERROR_LOWERTHAN_VALUES[error]['column']
                 if c in self.LOG_data:
-                    if self.LOG_data[c] > cfg.ERROR_LOWERTHAN_VALUES[c]:
-                        errors_off.append(error)
-                        errors_off_only_quiet.append(False)
+                    if c in cfg.ERROR_LOWERTHAN:
+                        if self.LOG_data[c] > cfg.ERROR_LOWERTHAN[c]:
+                            errors_off.append(error)
+                            errors_off_only_quiet.append(False)
+                    else:
+                        if self.LOG_data[c] != cfg.ERROR_LOWERTHAN_VALUES[error]['value']:
+                            errors_off.append(error)
+                            errors_off_only_quiet.append(False)
             elif error == cfg.ERROR_LOWERTHAN_DEFAULT:
                 found_lowerthan = False
                 for c in cfg.ERROR_LOWERTHAN:
