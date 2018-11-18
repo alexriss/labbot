@@ -710,8 +710,8 @@ class LabBot:
         str_out += 'n list\n'
         str_out += 'n t < 10\n'
         str_out += 'n list\n'
-        str_out += 'n del 1  _(delete notification 1)_'
-        str_out += 'n deact all  _(deactivate all notifications)_'
+        str_out += 'n del 1  _(delete notification 1)_\n'
+        str_out += 'n deact all  _(deactivate all notifications)_\n'
         str_out += 'n act 1 2 3   _(activate notifications 1,2, and 3)_'
         bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
@@ -969,6 +969,7 @@ class LabBot:
         plt.savefig(bio, format='png', dpi=100)
         bio.seek(0)
         bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
+        plt.close()
         logging.info('Graph sent to {}.'.format(chat_id))
 
     def read_logs(self, from_date, to_date):
