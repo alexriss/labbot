@@ -1027,6 +1027,7 @@ class LabBot:
         self.log_file = (datetime.datetime.now() - datetime.timedelta(seconds=10)).strftime(cfg.LOG_FILE)
 
         selected_lines = self.get_first_last_from_file(self.log_file, maxLineLength=maxLineLength, default=b"")
+        df = None
         try:
             df = pd.read_csv(io.BytesIO(selected_lines),
                              sep=cfg.LOG_FILE_DELIMITER,
@@ -1042,7 +1043,7 @@ class LabBot:
         except pd.errors.EmptyDataError:
             logging.warning('No data found in log file {}.'.format(self.log_file))
         finally:
-            if df.shape[0] > 0:
+            if isinstance(df, pd.DataFrame) and df.shape[0] > 0:
                 self.LOG_labels = log_labels
                 self.LOG_labels_nice = {l: l_nice for (l, l_nice) in zip(log_labels, log_labels_nice)}
                 self.LOG_last_checked = df.tail(1).index.to_pydatetime()[0]
