@@ -212,6 +212,10 @@ class LabBot:
             if update and update.message:
                 bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
+        except socket.timeout as e:
+            logging.warning('Socket timeout: {}.'.format(e))
+        except socket.error as e:
+            logging.warning('Socket error: {}.'.format(e))
         except telegram.error.NetworkError:
             logging.warning('Telegram error: Network error.')
             if update and update.message:
@@ -221,6 +225,8 @@ class LabBot:
             logging.warning('Telegram error: Chat {} migrated to {}.'.format(update.message.chat_id, e.new_chat_id))
         except telegram.error.TelegramError as e:
             # handle all other telegram related errors
+            logging.warning('Telegram error: {}.'.format(e))
+        except telegram.vendor.ptb_urllib3.urllib3.exceptions.ReadTimeoutError as e:
             logging.warning('Telegram error: {}.'.format(e))
 
     def callback_handler(self, bot, update):
