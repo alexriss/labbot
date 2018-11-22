@@ -13,10 +13,10 @@
 # Alex Riss, 2018, GPL
 #
 # TODO:
+#   - list of active warnings and respective next warning time; give it out numbered, then specific warnings can be silenced
 #   - better comments and documentation
 #   - unit tests
 #   - bakeout control and sending of webcam photos
-#   - friendly and hostile modes for random text messages
 
 
 from functools import wraps
@@ -34,6 +34,7 @@ import pandas as pd
 import pickle
 import random
 import re
+import socket
 import sys
 import threading
 import traceback
@@ -47,7 +48,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.14
+        self.__version__ = 0.15
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -162,7 +163,8 @@ class LabBot:
             {'keywords': ['temp', 'temperature', 't', 's', 'status',
                           'pressure', 'status', 'p'], 'func': self.status_sensors},
             {'keywords': ['graph', 'g'], 'func': self.status_graph},
-            {'keywords': ['warning', 'warnings', 'w'], 'func': self.warnings_config},
+            {'keywords': ['limit', 'limits', 'l'], 'func': self.limits_config},
+            {'keywords': ['warning', 'warnings', 'w'], 'func': self.active_warnings},
             {'keywords': ['notify', 'n'], 'func': self.user_notifications_manage},
             {'keywords': ['silence'], 'func': self.silence_errors},
             {'keywords': ['v', 'version'], 'func': self.version_handler},
@@ -177,7 +179,8 @@ class LabBot:
         self.dispatcher.add_handler(CommandHandler(['messageall', 'ma'], self.send_message_users, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['notify', 'n'], self.user_notifications_manage, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['graph', 'g'], self.status_graph, pass_args=True))
-        self.dispatcher.add_handler(CommandHandler(['warning', 'warnings', 'w'], self.warnings_config))
+        self.dispatcher.add_handler(CommandHandler(['warning', 'warnings', 'w'], self.active_warnings, pass_args=True))
+        self.dispatcher.add_handler(CommandHandler(['limit', 'limits', 'l'], self.limits_config))
         self.dispatcher.add_handler(CommandHandler(
             ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_sensors, pass_args=True))
         self.dispatcher.add_handler(CommandHandler(['bakeout'], self.status_bakeout))
@@ -382,8 +385,8 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def warnings_config(self, bot, update, args=[], chat_id=0):
-        """lists all warnings"""
+    def limits_config(self, bot, update, args=[], chat_id=0):
+        """lists all limits that are set in the config"""
         chat_id = self.get_chat_id(update, chat_id)
         str_out = '*Warning limits:*\n'
         for key, error in cfg.ERROR_LIMITS_MAX.items():
@@ -701,7 +704,8 @@ class LabBot:
         str_out = 'Ask me for *status updates* using: "status" or "/status" or "s".\n'
         str_out += 'Pressure, temperature and logging warnings will be sent every {:d} minutes. '.format(
             cfg.WARNING_SEND_EVERY_MINUTES)
-        str_out += 'Use /w or /warnings to see warning limits.\n\n'
+        str_out += 'Use /l or "limits" to see warning limits.\n\n'
+        str_out += '*Active warning messages* are shown using /w or "warnings".\n\n'
         str_out += 'The active *warnings can be silenced* for n hours using the command "/silence n".\n'
         str_out += 'n=0 will re-enable normal warnings.\n\n'
         str_out += '*Graphs* can be plotted using the "graph" keyword or "/graph" and "/g" commands. '
@@ -709,7 +713,7 @@ class LabBot:
         str_out += 'Try: "/g -3d" or "g -12h -10h"\n\n'
         str_out += 'The graph and status commands both support extra arguments'
         str_out += 'specifying the sensor data that should be plotted.\n'
-        str_out += '"g afm prep tafm" or "s all".\n\n'
+        str_out += '"g afm prep tafm" or "g all".\n\n'
         str_out += '*User notifications* can be set up using:\n'
         str_out += '/n afm < 1e-10\n'
         str_out += 'n afm lt 1e-10\n'
@@ -749,16 +753,32 @@ class LabBot:
         if not len(columns):
             columns = cfg.STATUS_DEFAULT_COLUMNS
 
-        # TODO: also add columns associated with any errors
+        # check if there are any columns associated with errors
+        columns_error = []
+        for error in cfg.ERROR_COLUMNS_MUSTHAVE:
+            if error in self.ERRORS_checks:
+                c = cfg.ERROR_COLUMNS_MUSTHAVE[error]['column']
+                if c not in columns:
+                    columns.append(c)
+                columns_error.append(c)
+        for error in cfg.ERROR_LIMITS_MAX:
+            if error in self.ERRORS_checks:
+                c = cfg.ERROR_LIMITS_MAX[error]['column']
+                if c not in columns:
+                    columns.append(c)
+                columns_error.append(c)
 
         log_data_replaced = self.replace_lowerthan(self.LOG_data)
         for c in columns:
             if c in self.LOG_data:
                 val = log_data_replaced[c]
+                str_error = ''
+                if c in columns_error:
+                    str_error = " " + cfg.WARNING_SYMBOL
                 if isinstance(val, str):
-                    str_out += "\n*{}*: {}".format(self.LOG_labels_nice[c], val)
+                    str_out += "\n*{}*: {}{}".format(self.LOG_labels_nice[c], val, str_error)
                 else:
-                    str_out += "\n*{}*: {:.{prec}g}".format(self.LOG_labels_nice[c], val, prec=cfg.FLOAT_PRECISION_BOT)
+                    str_out += "\n*{}*: {:.{prec}g}{}".format(self.LOG_labels_nice[c], val, str_error, prec=cfg.FLOAT_PRECISION_BOT)
             else:
                 # check the message requests - here we need to read the log file
                 for entity, cm_dict in cfg.MEASURE_REQUESTS.items():
@@ -803,17 +823,26 @@ class LabBot:
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('Photo (not implemented) sent to {}.'.format(chat_id))
 
-    def status_error(self, bot):
+    @restricted
+    @send_action(ChatAction.TYPING)
+    def active_warnings(self, bot, update, args=[], chat_id=0):
+        self.status_error(bot, update, args, chat_id, send_all=True)
+
+    def status_error(self, bot, update=None, args=[], chat_id=0, send_all=False):
+        """sends error messages. If send_all is True, then a list of all errors will be sent"""
         now = datetime.datetime.now()
+        str_out = ''
         for chat_id in cfg.LIST_OF_USERS:
+            if not send_all:
+                str_out = ''
             errors_sent = False
             for error in self.ERRORS_checks.keys():
                 if chat_id not in self.ERRORS_checks[error]:
                     continue
-                if (self.ERRORS_checks[error][chat_id]['sendNext']):
+                if not send_all and self.ERRORS_checks[error][chat_id]['sendNext']:
                     if now <= self.ERRORS_checks[error][chat_id]['sendNext']:
                         continue
-                str_out = cfg.WARNING_MESSAGES[error]
+                str_out += cfg.WARNING_MESSAGES[error]
                 if 'value' in self.ERRORS_checks[error][chat_id]:
                     str_out = cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
                 if error == 'ERROR_log_read':
@@ -821,15 +850,21 @@ class LabBot:
                         str_out += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
                     else:
                         str_out += 'unknown.'
-                bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
-                self.ERRORS_checks[error][chat_id]['sendNext'] = now + \
-                    datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES)
-                self.ERRORS_checks[error][chat_id]['timesSent'] += 1
-                logging.info('Warning message "{}" sent to {}.'.format(error, chat_id))
-                errors_sent = True
+
+                if not send_all:
+                    bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                    bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+                    self.ERRORS_checks[error][chat_id]['sendNext'] = now + \
+                        datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES)
+                    self.ERRORS_checks[error][chat_id]['timesSent'] += 1
+                    logging.info('Warning message "{}" sent to {}.'.format(error, chat_id))
+                    errors_sent = True
             if errors_sent:
                 self.status_sensors(bot, None, chat_id=chat_id)
+            if send_all and str_out:
+                chat_id = self.get_chat_id(update, chat_id)
+                bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
 
     def status_error_off(self, bot, errors_off=[], errors_off_only_quiet=[]):
         """resets errors and sends de-warning message."""
