@@ -832,8 +832,14 @@ class LabBot:
         """sends error messages. If send_all is True, then a list of all errors will be sent"""
         now = datetime.datetime.now()
         str_out = ''
+        if send_all:  # there was a user request
+            chat_id_request = self.get_chat_id(update, chat_id)
+
         for chat_id in cfg.LIST_OF_USERS:
-            if not send_all:
+            if send_all:
+                if chat_id != chat_id_request:
+                    continue
+            else:
                 str_out = ''
             errors_sent = False
             for error in self.ERRORS_checks.keys():
@@ -842,6 +848,8 @@ class LabBot:
                 if not send_all and self.ERRORS_checks[error][chat_id]['sendNext']:
                     if now <= self.ERRORS_checks[error][chat_id]['sendNext']:
                         continue
+                if send_all:
+                    str_out += '\n'
                 str_out += cfg.WARNING_MESSAGES[error]
                 if 'value' in self.ERRORS_checks[error][chat_id]:
                     str_out = cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
@@ -861,10 +869,13 @@ class LabBot:
                     errors_sent = True
             if errors_sent:
                 self.status_sensors(bot, None, chat_id=chat_id)
-            if send_all and str_out:
-                chat_id = self.get_chat_id(update, chat_id)
-                bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+            if send_all:
+                if str_out:
+                    str_out = '*Active warning messages:*' + str_out
+                    bot.send_message(chat_id=chat_id_request, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+                else:
+                    bot.send_message(chat_id=chat_id_request, text='No active warning messages.', parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+                logging.info('List of warning messages sent to {}.'.format(chat_id_request))
 
     def status_error_off(self, bot, errors_off=[], errors_off_only_quiet=[]):
         """resets errors and sends de-warning message."""
