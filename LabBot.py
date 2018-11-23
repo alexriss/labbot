@@ -734,6 +734,8 @@ class LabBot:
             str_out += "*{}*".format(self.date_format_bot(self.LOG_last_checked))
         if self.quiet_hours():
             str_out += ' _(quiet hours)_'
+        if 'ERROR_log_read' in self.ERRORS_checks:
+            str_out += ' ' + cfg.WARNING_SYMBOL
 
         query_string = ' '.join(args)
         query_string = re.sub(r'[^\w\s]', ' ', query_string.replace('-', ''))
@@ -850,12 +852,14 @@ class LabBot:
                         continue
                 if send_all:
                     str_out += '\n'
+                    pre = ''
                 else:
                     str_out = ''
+                    pre = cfg.WARNING_PRE
                 if 'value' in self.ERRORS_checks[error][chat_id]:
-                    str_out += cfg.WARNING_PRE + cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
+                    str_out += pre  + cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
                 else:
-                    str_out += cfg.WARNING_PRE + cfg.WARNING_MESSAGES[error]
+                    str_out += pre + cfg.WARNING_MESSAGES[error]
                 if error == 'ERROR_log_read':
                     if self.LOG_last_checked:
                         str_out += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
