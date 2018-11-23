@@ -757,15 +757,13 @@ class LabBot:
 
         # check if there are any columns associated with errors
         columns_error = []
-        for error in cfg.ERROR_COLUMNS_MUSTHAVE:
+        error_lists = {}
+        error_lists.update(cfg.ERROR_COLUMNS_MUSTHAVE)
+        error_lists.update(cfg.ERROR_LIMITS_MAX)
+        error_lists.update(cfg.ERROR_LOWERTHAN_VALUES)
+        for error, error_dict in error_lists.items():
             if error in self.ERRORS_checks:
-                c = cfg.ERROR_COLUMNS_MUSTHAVE[error]['column']
-                if c not in columns:
-                    columns.append(c)
-                columns_error.append(c)
-        for error in cfg.ERROR_LIMITS_MAX:
-            if error in self.ERRORS_checks:
-                c = cfg.ERROR_LIMITS_MAX[error]['column']
+                c = error_dict['column']
                 if c not in columns:
                     columns.append(c)
                 columns_error.append(c)
