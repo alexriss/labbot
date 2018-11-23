@@ -850,9 +850,12 @@ class LabBot:
                         continue
                 if send_all:
                     str_out += '\n'
-                str_out += cfg.WARNING_MESSAGES[error]
+                else:
+                    str_out = ''
                 if 'value' in self.ERRORS_checks[error][chat_id]:
-                    str_out = cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
+                    str_out += cfg.WARNING_PRE + cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
+                else:
+                    str_out += cfg.WARNING_PRE + cfg.WARNING_MESSAGES[error]
                 if error == 'ERROR_log_read':
                     if self.LOG_last_checked:
                         str_out += self.LOG_last_checked.strftime(cfg.DATE_FMT_BOT) + '.'
@@ -885,7 +888,7 @@ class LabBot:
                 if chat_id not in self.ERRORS_checks[error]:
                     continue
                 if self.ERRORS_checks[error][chat_id]['timesSent'] > 0:
-                    str_out = cfg.WARNING_OFF_MESSAGES[error]
+                    str_out = cfg.WARNING_OFF_PRE + cfg.WARNING_OFF_MESSAGES[error]
                     if error_off_only_quiet:
                         str_out += cfg.WARNING_OFF_MESSAGE_ONLY_QUIET
                     bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
