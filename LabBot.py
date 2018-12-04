@@ -753,7 +753,7 @@ class LabBot:
                 if c:
                     columns.append(c)
         if not len(columns):
-            columns = cfg.STATUS_DEFAULT_COLUMNS
+            columns = cfg.STATUS_DEFAULT_COLUMNS.copy()
 
         # check if there are any columns associated with errors
         columns_error = []
@@ -855,7 +855,7 @@ class LabBot:
                     str_out = ''
                     pre = cfg.WARNING_PRE
                 if 'value' in self.ERRORS_checks[error][chat_id]:
-                    str_out += pre  + cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
+                    str_out += pre + cfg.WARNING_MESSAGES[error].format(self.ERRORS_checks[error][chat_id]['value'])
                 else:
                     str_out += pre + cfg.WARNING_MESSAGES[error]
                 if error == 'ERROR_log_read':
