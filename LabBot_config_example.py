@@ -81,17 +81,18 @@ ERROR_COLUMNS_MUSTHAVE = {
 
 
 # error_name, index in LOG_values, and limits (first value is the normal warning value, second is for quiet hours)
+# warnings will only be sent after at the values were found to be exceeded at least min_count consecutive times.
 ERROR_LIMITS_MAX = {
     # maximum AFM pressure for warning (in mbar)
-    "ERROR_pressure_afm": {"column": "PAFM[mbar]", "limits": [1e-9, 8e-8]},
+    "ERROR_pressure_afm": {"column": "PAFM[mbar]", "limits": [1e-9, 8e-8], "min_count": 0},
     # maximum PREP pressure for warning (in mbar)
-    "ERROR_pressure_prep": {"column": "PPRP[mbar]", "limits": [1e-8, 8e-5]},
+    "ERROR_pressure_prep": {"column": "PPRP[mbar]", "limits": [1e-8, 8e-5], "min_count": 0},
     # maximum ROUGHING pressure for warning (in mbar)
-    "ERROR_pressure_roughing": {"column": "PROU[mbar]", "limits": [1.2, 1.2]},
+    "ERROR_pressure_roughing": {"column": "PROU[mbar]", "limits": [1.2, 1.2], "min_count": 0},
     # maximum temperature for the AFM temperature diode reading
-    "ERROR_temperature_afm": {"column": "TAFM[K]", "limits": [20.0, 32.0]},
+    "ERROR_temperature_afm": {"column": "TAFM[K]", "limits": [20.0, 32.0], "min_count": 2},
     # maximum temperature for the cryo temperature diode reading
-    "ERROR_temperature_cryo": {"column": "TCRY[K]", "limits": [7.0, 7.0]},
+    "ERROR_temperature_cryo": {"column": "TCRY[K]", "limits": [7.0, 7.0], "min_count": 3},
 }
 
 # nonpositive values can encode error codes, if values smaller than the given value are detected, errors are raised

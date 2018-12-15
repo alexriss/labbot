@@ -1115,18 +1115,18 @@ class LabBot:
         self.check_measure_requests()
         self.check_logging_file()
 
-    def error_add(self, error, value=""):
+    def error_add(self, error, value="", min_count=0):
         """adds error to error list for all users"""
         now = datetime.datetime.now()
         if error not in self.ERRORS_checks.keys():
             self.ERRORS_checks[error] = {}
-            for user in cfg.LIST_OF_USERS:
-                if user not in self.ERRORS_checks[error].keys():
-                    self.ERRORS_checks[error][user] = {
-                        'sendNext': now - datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES),
-                        'timesSent': 0,
-                        'value': value
-                    }
+        for user in cfg.LIST_OF_USERS:
+            if user not in self.ERRORS_checks[error].keys():
+                self.ERRORS_checks[error][user] = {
+                    'sendNext': now + (min_count - 1) * datetime.timedelta(minutes=cfg.READ_LOG_EVERY_SECONDS),
+                    'timesSent': 0,
+                    'value': value,
+                }
 
         write_log = False
         if error not in self.LOGGING_last_write.keys():
@@ -1236,7 +1236,10 @@ class LabBot:
             for error, e_dict in cfg.ERROR_LIMITS_MAX.items():
                 if e_dict['column'] in self.LOG_data:
                     if self.LOG_data[e_dict['column']] > e_dict['limits'][i_quiet]:
-                        self.error_add(error, self.LOG_data[e_dict['column']])
+                        min_count = 0
+                        if 'min_count' in e_dict:
+                            min_count = e_dict['min_count']
+                        self.error_add(error, self.LOG_data[e_dict['column']], min_count=min_count)
 
             negative_error_default = False
             negative_error_columns = []
