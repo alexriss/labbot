@@ -950,6 +950,13 @@ class LabBot:
 
         # parse args
         if len(args) >= 1:
+            for i, a in enumerate(args):
+                try:
+                    args[i] = str(float(args[i])) +'h'  # "20" means "20h"
+                except ValueError:
+                    pass
+                args[i] = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"-\1", args[i])  # "20h" means "-20h"
+                if i>=1: break
             try:
                 # dm gives UTC timezone, so first we convert to local timezone and then
                 # remove the timezon info (so we can compare with the logged entries)
@@ -993,7 +1000,7 @@ class LabBot:
         # get colors for columns
         colors = {}
         for i, c in enumerate(self.LOG_labels):
-            color = plt.cm.tab20(np.linspace(0, 1, 10))[i % len(self.LOG_labels)]
+            color = plt.cm.tab20(np.linspace(0, 1, len(self.LOG_labels)))[i % len(self.LOG_labels)]
             colors[c] = matplotlib.colors.rgb2hex(color[0:3])
         # colors = ['#1b9e77', '#e41a1c', '#d95f02', '#386cb0', '#285ca0']
         total_count = 0
