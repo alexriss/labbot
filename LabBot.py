@@ -338,7 +338,7 @@ class LabBot:
         query = query.lower()
         for key, vals in cfg.COLUMNS_LABELS.items():
             for val in vals:
-                if val.lower() in query:  # or key.lower() in query:
+                if val.lower() == query:  # if val.lower() in query or key.lower() in query:
                     return key
         return default
 
@@ -1294,9 +1294,10 @@ class LabBot:
                         continue
                 sign = n['comparison']
                 if n['column'] in self.LOG_data:
-                    if sign * self.LOG_data[n['column']] > sign * n['limit']:
-                        self.status_user_notification(bot=self.bot, update=None, chat_id=user, notification=n)
-                        n_inactivate.append(i)
+                    if type(self.LOG_data[n['column']]) in [int, float]:
+                        if sign * self.LOG_data[n['column']] > sign * n['limit']:
+                            self.status_user_notification(bot=self.bot, update=None, chat_id=user, notification=n)
+                            n_inactivate.append(i)
             # inactivate notification
             for i in n_inactivate:  # if we want to delete them, we need to use reversed(n_inactivate)
                 self.USER_config[user]['notifications'][i]['active'] = False
