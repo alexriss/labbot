@@ -113,7 +113,11 @@ class LabBot:
                 if 'chat_id' not in kwargs.keys():
                     kwargs['chat_id'] = 0
                 chat_id = self.get_chat_id(update, kwargs['chat_id'])
-                context.bot.send_chat_action(chat_id=chat_id, action=action)
+                if context:
+                    bot = context.bot
+                else:
+                    bot = self.bot
+                bot.send_chat_action(chat_id=chat_id, action=action)
                 func(self, update, context, **kwargs)
             return command_func
         return decorator
@@ -721,7 +725,11 @@ class LabBot:
         str1 = u"\u261D" + ' *User notification: *'
         str2 = self.notification_to_string(notification)
 
-        context.bot.send_message(chat_id=chat_id, text=str1 + str2,
+        if context:
+            bot = context.box
+        else:
+            bot = self.bot
+        bot.send_message(chat_id=chat_id, text=str1 + str2,
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('User notification sent to {}: {}.'.format(chat_id, str2))
 
@@ -860,7 +868,7 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def active_warnings(self, update, context, chat_id=0):
+    def active_warnings(self, update, context, args=[], chat_id=0):
         self.status_error(update, context, chat_id, send_all=True)
 
     def status_error(self, update=None, context=None, chat_id=0, send_all=False):
@@ -1334,7 +1342,7 @@ class LabBot:
                 if n['column'] in self.LOG_data:
                     if type(self.LOG_data[n['column']]) in [int, float]:
                         if sign * self.LOG_data[n['column']] > sign * n['limit']:
-                            self.status_user_notification(bot=self.bot, update=None, chat_id=user, notification=n)
+                            self.status_user_notification(None, None, chat_id=user, notification=n)
                             n_inactivate.append(i)
             # inactivate notification
             for i in n_inactivate:  # if we want to delete them, we need to use reversed(n_inactivate)
