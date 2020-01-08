@@ -10,7 +10,7 @@
 # A user notification system is available.
 # Type "h" or "help" for more information about the bot.
 #
-# Alex Riss, 2018, GPL
+# Alex Riss, 2018-2020, GPL
 #
 # TODO:
 #   - list of active warnings and respective next warning time; give it out numbered, then specific warnings can be silenced
@@ -48,7 +48,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.15
+        self.__version__ = 0.20
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -77,7 +77,7 @@ class LabBot:
             if user not in self.USER_config:
                 self.USER_config[user] = {'quiet_times': True}
 
-        self.updater = Updater(token=cfg.BOT_TOKEN)
+        self.updater = Updater(token=cfg.BOT_TOKEN, use_context=True)
         self.dispatcher = self.updater.dispatcher
         self.bot = self.updater.bot
 
@@ -109,18 +109,18 @@ class LabBot:
         def decorator(func):
             @wraps(func)
             def command_func(*args, **kwargs):
-                self, bot, update = args[0:3]
+                self, update, context = args[0:3]
                 if 'chat_id' not in kwargs.keys():
                     kwargs['chat_id'] = 0
                 chat_id = self.get_chat_id(update, kwargs['chat_id'])
-                bot.send_chat_action(chat_id=chat_id, action=action)
-                func(self, bot, update, **kwargs)
+                context.bot.send_chat_action(chat_id=chat_id, action=action)
+                func(self, update, context, **kwargs)
             return command_func
         return decorator
 
     def restricted(func):
         @wraps(func)
-        def wrapped(self, bot, update, *args, **kwargs):
+        def wrapped(self, update, context, *args, **kwargs):
             if 'chat_id' not in kwargs.keys():
                 kwargs['chat_id'] = 0
             chat_id = self.get_chat_id(update, kwargs['chat_id'])
@@ -132,7 +132,7 @@ class LabBot:
                 print("Unauthorized access denied for {}.".format(user_id))
                 logging.warning("Unauthorized access denied for {}.".format(user_id))
                 return
-            return func(self, bot, update, *args, **kwargs)
+            return func(self, update, context, *args, **kwargs)
         return wrapped
 
     def setup_handlers(self):
@@ -140,22 +140,32 @@ class LabBot:
 
         class FilterPressure(BaseFilter):
             def filter(self, message):
+                if not message.text:
+                    return False
                 return (('pressure' in message.text.lower()) or ('status' in message.text.lower()))
 
         class FilterBakeout(BaseFilter):
             def filter(self, message):
+                if not message.text:
+                    return False
                 return 'bakeout' in message.text.lower()
 
         class FilterPhoto(BaseFilter):
             def filter(self, message):
+                if not message.text:
+                    return False
                 return 'photo' in message.text.lower()
 
         class FilterHelp(BaseFilter):
             def filter(self, message):
+                if not message.text:
+                    return False
                 return (('help' in message.text.lower()) or 'h' == message.text.lower())
 
         class FilterGraph(BaseFilter):
             def filter(self, message):
+                if not message.text:
+                    return False
                 return (('graph' in message.text.lower()) or 'g' == message.text.lower())
 
         self.commands = [  # will be used in the message_command_handler
@@ -172,19 +182,19 @@ class LabBot:
         ]
 
         self.dispatcher.add_handler(CommandHandler(['start', 'hello', 'hi'], self.hello_handler))
-        self.dispatcher.add_handler(CommandHandler('silence', self.silence_errors, pass_args=True))
+        self.dispatcher.add_handler(CommandHandler('silence', self.silence_errors))  # uses args
         self.dispatcher.add_handler(CommandHandler(['help', 'h'], self.help_message))
         self.dispatcher.add_handler(CommandHandler(['v', 'version'], self.version_handler))
         self.dispatcher.add_handler(CommandHandler(['d', 'time', 'datetime', 'date'], self.datetime_handler))
-        self.dispatcher.add_handler(CommandHandler(['messageall', 'ma'], self.send_message_users, pass_args=True))
-        self.dispatcher.add_handler(CommandHandler(['notify', 'n'], self.user_notifications_manage, pass_args=True))
-        self.dispatcher.add_handler(CommandHandler(['graph', 'g'], self.status_graph, pass_args=True))
-        self.dispatcher.add_handler(CommandHandler(['warning', 'warnings', 'w'], self.active_warnings, pass_args=True))
+        self.dispatcher.add_handler(CommandHandler(['messageall', 'ma'], self.send_message_users))  # uses args
+        self.dispatcher.add_handler(CommandHandler(['notify', 'n'], self.user_notifications_manage))  # uses args
+        self.dispatcher.add_handler(CommandHandler(['graph', 'g'], self.status_graph))  # uses args
+        self.dispatcher.add_handler(CommandHandler(['warning', 'warnings', 'w'], self.active_warnings))
         self.dispatcher.add_handler(CommandHandler(['limit', 'limits', 'l'], self.limits_config))
         self.dispatcher.add_handler(CommandHandler(
-            ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_sensors, pass_args=True))
+            ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_sensors))  # uses args
         self.dispatcher.add_handler(CommandHandler(['bakeout'], self.status_bakeout))
-        self.dispatcher.add_handler(CommandHandler(['measure'], self.measure_handler, pass_args=True))
+        self.dispatcher.add_handler(CommandHandler(['measure'], self.measure_handler))  # uses args
         self.dispatcher.add_handler(CommandHandler(['photo', 'pic'], self.status_photo))
 
         self.dispatcher.add_handler(MessageHandler(Filters.command, self.unknown_command_handler))
@@ -199,21 +209,21 @@ class LabBot:
         self.dispatcher.add_handler(CallbackQueryHandler(self.callback_handler))
         self.dispatcher.add_error_handler(self.error_callback)
 
-    def error_callback(self, bot, update, error):
+    def error_callback(self, update, context):
         try:
-            raise error
+            raise context.error
         except telegram.error.Unauthorized:
-            if update and update.message:
-                logging.warning('Telegram error: Unauthorized user: {}'.format(update.message.chat_id))
+            if update and update.effective_message:
+                logging.warning('Telegram error: Unauthorized user: {}'.format(update.effective_message.chat_id))
         except telegram.error.BadRequest:
             logging.warning('Telegram error: Bad request.')
-            if update and update.message:
-                bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
+            if update and update.effective_message:
+                context.bot.send_message(chat_id=update.effective_message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
         except telegram.error.TimedOut:
             logging.warning('Telegram error: Network timeeout.')
-            if update and update.message:
-                bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
+            if update and update.effective_message:
+                context.bot.send_message(chat_id=update.effective_message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
         except socket.timeout as e:
             logging.warning('Socket timeout: {}.'.format(e))
@@ -221,65 +231,65 @@ class LabBot:
             logging.warning('Socket error: {}.'.format(e))
         except telegram.error.NetworkError:
             logging.warning('Telegram error: Network error.')
-            if update and update.message:
-                bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(
+            if update and update.effective_message:
+                context.bot.send_message(chat_id=update.effective_message.chat_id, text=self.pick_random(
                     cfg.TEXTS_ERROR), parse_mode=telegram.ParseMode.MARKDOWN)
         except telegram.error.ChatMigrated as e:
-            logging.warning('Telegram error: Chat {} migrated to {}.'.format(update.message.chat_id, e.new_chat_id))
+            logging.warning('Telegram error: Chat {} migrated to {}.'.format(update.effective_message.chat_id, e.new_chat_id))
         except telegram.error.TelegramError as e:
             # handle all other telegram related errors
             logging.warning('Telegram error: {}.'.format(e))
         except telegram.vendor.ptb_urllib3.urllib3.exceptions.ReadTimeoutError as e:
             logging.warning('Telegram error: {}.'.format(e))
 
-    def callback_handler(self, bot, update):
+    def callback_handler(self, update, context):
         """handles inline button callbacks"""
         querydata = update.callback_query.data
         if querydata == '/status':
-            self.status_sensors(bot, update)
+            self.status_sensors(update, context)
         elif querydata == '/graph':
-            self.status_graph(bot, update)
+            self.status_graph(update, context)
         elif querydata == '/bakeout':
-            self.status_bakeout(bot, update)
+            self.status_bakeout(update, context)
         elif querydata == '/photo':
-            self.status_photo(bot, update)
+            self.status_photo(update, context)
         elif querydata == '/help':
-            self.help_message(bot, update)
+            self.help_message(update, context)
         elif querydata == '/n':
-            self.user_notifications_manage(bot, update, args=['list'])
+            self.user_notifications_manage(update, context, args=['list'])
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def unknown_command_handler(self, bot, update, chat_id=0):
+    def unknown_command_handler(self, update, context, chat_id=0):
         """respond to unknown command"""
-        bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(cfg.TEXTS_UNKNOWN_COMMAND),
+        context.bot.send_message(chat_id=update.effective_message.chat_id, text=self.pick_random(cfg.TEXTS_UNKNOWN_COMMAND),
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def datetime_handler(self, bot, update, args=[], chat_id=0):
+    def datetime_handler(self, update, context, args=[], chat_id=0):
         """return current date and time"""
-        bot.send_message(chat_id=update.message.chat_id, text=datetime.datetime.now().strftime(
+        context.bot.send_message(chat_id=update.effective_message.chat_id, text=datetime.datetime.now().strftime(
             cfg.DATE_FMT_BOT), parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
-        logging.info('Datetime sent to {}'.format(update.message.chat_id))
+        logging.info('Datetime sent to {}'.format(update.effective_message.chat_id))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def version_handler(self, bot, update, args=[], chat_id=0):
+    def version_handler(self, update, context, args=[], chat_id=0):
         """send version information"""
         version = self.get_version(markdown=True)
-        bot.send_message(chat_id=update.message.chat_id, text=version,
+        context.bot.send_message(chat_id=update.effective_message.chat_id, text=version,
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
-        logging.info('Version {} sent to {}'.format(version, update.message.chat_id))
+        logging.info('Version {} sent to {}'.format(version, update.effective_message.chat_id))
 
     @restricted
     # @send_action(ChatAction.TYPING)
-    def message_command_handler(self, bot, update, chat_id=0):
+    def message_command_handler(self, update, context, chat_id=0):
         """checks for possible commands in the message (without the '/' prefix"""
 
-        if not len(update.message.text):
+        if not len(update.effective_message.text):
             return False
-        args = update.message.text.split()
+        args = update.effective_message.text.split()
 
         if len(args) > 1:  # first arg is the command
             args = args[1:]
@@ -287,16 +297,16 @@ class LabBot:
             args = []
         for command in self.commands:  # defined above
             for c in command['keywords']:
-                text = update.message.text
+                text = update.effective_message.text
                 if len(c) <= cfg.MESSAGE_COMMANDS_STRICT_MAXLENGTH:  # be more strict for short commands
                     text = text.split()[0].lower()
                 else:
                     text = text[0:len(c)].lower()
                 if c == text:
-                    command['func'](bot, update, args=args)
+                    command['func'](update, context, args=args)
                     return
 
-        self.unknown_command_handler(bot, update)
+        self.unknown_command_handler(update, context)
 
     def build_menu(self, buttons,
                    n_cols,
@@ -313,9 +323,9 @@ class LabBot:
         if not chat_id:
             if not update:
                 raise ValueError('No chat_id and no update object is provided.')
-            if update.message:
-                chat_id = update.message.chat_id
-            elif update.callback_query.message:
+            if update.effective_message:
+                chat_id = update.effective_message.chat_id
+            elif update.callback_query and update.callback_query.message:
                 chat_id = update.callback_query.message.chat_id
             else:
                 raise ValueError('No chat_id and no update object is provided.')
@@ -378,14 +388,14 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def hello_handler(self, bot, update, args=[], chat_id=0):
-        bot.send_message(chat_id=update.message.chat_id, text=self.pick_random(cfg.TEXTS_START),
+    def hello_handler(self, update, context, args=[], chat_id=0):
+        context.bot.send_message(chat_id=update.effective_message.chat_id, text=self.pick_random(cfg.TEXTS_START),
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
-        logging.info('Hello {}.'.format(update.message.chat_id))
+        logging.info('Hello {}.'.format(update.effective_message.chat_id))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def limits_config(self, bot, update, args=[], chat_id=0):
+    def limits_config(self, update, context, args=[], chat_id=0):
         """lists all limits that are set in the config"""
         chat_id = self.get_chat_id(update, chat_id)
         str_out = '*Warning limits:*\n'
@@ -397,20 +407,25 @@ class LabBot:
         str_quiet_days = ", ".join(calendar.day_abbr[n] for n in cfg.QUIET_TIMES_WEEKDAYS)
         str_out += '\n_The first value is the upper limit outside of quiet hours, second value is within quiet hours.'
         str_out += ' Quiet hours are from {} to {} on {}. These settings can be changed by your administrator._'.format(str_quiet_start, str_quiet_end, str_quiet_days)
-        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+        context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('List of warning limits sent to {}.'.format(chat_id))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def measure_handler(self, bot, update, args, chat_id=0):
+    def measure_handler(self, update, context, args=[], chat_id=0):
         """send measure commands via a text file"""
+        if not args:
+            args = context.args
+        if not args:
+            args = []
+
         now = datetime.datetime.now()
         chat_id = self.get_chat_id(update, chat_id)
 
         if len(args) != 1 or args[0].lower() not in cfg.MEASURE_REQUESTS:
             str_out = "I don't know what to measure."
             logging.info("Measure request ({}) by {} unsuccessful.".format(args, chat_id))
-            bot.send_message(chat_id=chat_id, text=str_out, reply_markup=self.reply_markup)
+            context.bot.send_message(chat_id=chat_id, text=str_out, reply_markup=self.reply_markup)
             return False
 
         entity = args[0].lower()
@@ -436,11 +451,11 @@ class LabBot:
 
         str_out = "Sent request to measure *{}*.".format(entity)
         logging.info("Measure request ({}) by {}.".format(entity, chat_id))
-        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+        context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def measure_send_result(self, bot, update, args=[], chat_id=0):
+    def measure_send_result(self, update, context, args=[], chat_id=0):
         """send result of the measurement to the user"""
         chat_id = self.get_chat_id(update, chat_id)
         self.bot.send_message(
@@ -472,8 +487,14 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def silence_errors(self, bot, update, args, chat_id=0):
+    def silence_errors(self, update, context, args=[], chat_id=0):
         """silence current warnings for the specified amount of hours"""
+        if not args:
+            args = context.args
+        if not args:
+            args = []
+        if len(args) == 0:
+            args[0] = 0
         now = datetime.datetime.now()
         chat_id = self.get_chat_id(update, chat_id)
 
@@ -502,18 +523,22 @@ class LabBot:
         else:
             str_error_names = ", ".join([cfg.WARNING_NAMES[e] for e in list_disabled])
             str_out = 'Active warning messages ({}) disabled for {} hours.'.format(str_error_names, hours)
-        bot.send_message(chat_id=chat_id, text=str_out, reply_markup=self.reply_markup)
+        context.bot.send_message(chat_id=chat_id, text=str_out, reply_markup=self.reply_markup)
 
     @restricted
-    def send_message_users(self, bot, update, args=[], chat_id=0):
+    def send_message_users(self, update, context, args=[], chat_id=0):
+        if not args:
+            args = context.args
+        if not args:
+            args = []
         if len(args) > 0:
             chat_id_sender = self.get_chat_id(update, chat_id)
-            name = update.message.from_user.first_name
+            name = update.effective_message.from_user.first_name
             str1 = "*Message from {}:*\n\n".format(name)
             str2 = " ".join(args)
             for chat_id in cfg.LIST_OF_USERS:
-                bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                bot.send_message(chat_id=chat_id, text=str1 + str2, parse_mode=telegram.ParseMode.MARKDOWN)
+                context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                context.bot.send_message(chat_id=chat_id, text=str1 + str2, parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('{} messaged all with: {}.'.format(chat_id_sender, str2))
 
     def notification_to_string(self, notification):
@@ -573,11 +598,15 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def user_notifications_manage(self, bot, update, args=[], chat_id=0):
+    def user_notifications_manage(self, update, context, args=[], chat_id=0):
+        if not args:
+            args = context.args
+        if not args:
+            args = []    
         chat_id = self.get_chat_id(update, chat_id)
 
         if len(args) == 0:
-            bot.send_message(chat_id=chat_id, text='Please specify which notification you want to setup,'
+            context.bot.send_message(chat_id=chat_id, text='Please specify which notification you want to setup,'
                              '\ne.g. "/n temp < 8".\nAlso you can use "/n list" to list notifications'
                              ' and "/n del n" to delete a specific notification.\n\n{}'.format(
                                  self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN)
@@ -587,7 +616,7 @@ class LabBot:
         if args[0] in ['list', 'l']:  # list notifications
             str_out = self.notification_list(chat_id)
 
-            bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+            context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification list sent to {}.'.format(chat_id))
             return True
 
@@ -600,7 +629,7 @@ class LabBot:
         for action_key, action_dict in action_dicts.items():
             if args[0] in action_dict['keywords']:
                 if len(args) <= 1:
-                    bot.send_message(
+                    context.bot.send_message(
                         chat_id=chat_id, text='Please specify which notification to {}, e.g. "n {} 2"'.format(
                             action_dict['str_todo'], action_dict['keywords'][0]
                         ), parse_mode=telegram.ParseMode.MARKDOWN
@@ -617,7 +646,7 @@ class LabBot:
                 if num_changed != 1:
                     str_plural = 's'
 
-                bot.send_message(chat_id=chat_id, text='{:d} notification{} {}.\n\n{}'.format(
+                context.bot.send_message(chat_id=chat_id, text='{:d} notification{} {}.\n\n{}'.format(
                     num_changed, str_plural, action_dict['str_done'],
                     self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN
                 )
@@ -633,7 +662,7 @@ class LabBot:
                               ' '.join(args)).replace('>', ' > ').replace('<', ' < ').replace(',', '.')
         query_items = query_string.split()
         if len(query_items) != 3:
-            bot.send_message(chat_id=chat_id, text='Notification should contain three elements,\ne.g. "/n temp < 8".',
+            context.bot.send_message(chat_id=chat_id, text='Notification should contain three elements,\ne.g. "/n temp < 8".',
                              parse_mode=telegram.ParseMode.MARKDOWN)
             logging.info('Notification-setup for {} failed due to wrong format ({}).'.format(chat_id, " ".join(args)))
             return False
@@ -641,7 +670,7 @@ class LabBot:
         column = self.get_column_name(query_items[0])
         if not column:
             str_out = ", ".join([val[0] for val in cfg.COLUMNS_LABELS.values()])
-            bot.send_message(
+            context.bot.send_message(
                 chat_id=chat_id,
                 text='I do not recognize the first element. It should be one of:\n{}'.format(str_out),
                 parse_mode=telegram.ParseMode.MARKDOWN
@@ -655,7 +684,7 @@ class LabBot:
         elif query_items[1] in ['<', 's', 'lt', 'l', 'k', 'kl']:
             comparison = -1
         if comparison == 0:  # the query_item was neither "<" nor ">"
-            bot.send_message(
+            context.bot.send_message(
                 chat_id=chat_id,
                 text='The second element of the notification should be either "<" or ">",\n e.g. "temp < 8".',
                 parse_mode=telegram.ParseMode.MARKDOWN)
@@ -665,7 +694,7 @@ class LabBot:
         try:
             limit = float(query_items[2].lower().replace('k', '').replace('mbar', ''))  # remove units
         except ValueError:
-            bot.send_message(
+            context.bot.send_message(
                 chat_id=chat_id,
                 text='The third element of the notification should be a number,\n e.g. "temp < 8".',
                 parse_mode=telegram.ParseMode.MARKDOWN)
@@ -679,26 +708,26 @@ class LabBot:
         self.USER_config[chat_id]['notifications'].append(n)
         str_out = self.notification_to_string(n)
         self.save_config = True
-        bot.send_message(chat_id=chat_id, text='Notification set up: {}\n\n{}'.format(
+        context.bot.send_message(chat_id=chat_id, text='Notification set up: {}\n\n{}'.format(
             str_out, self.notification_list(chat_id)), parse_mode=telegram.ParseMode.MARKDOWN)
         logging.info('Notification set up for {}: {}.'.format(chat_id, str_out))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_user_notification(self, bot, update, chat_id=0, notification=None):
+    def status_user_notification(self, update, context, chat_id=0, notification=None):
         """notifies of user-specific notifications"""
         chat_id = self.get_chat_id(update, chat_id)
 
         str1 = u"\u261D" + ' *User notification: *'
         str2 = self.notification_to_string(notification)
 
-        bot.send_message(chat_id=chat_id, text=str1 + str2,
+        context.bot.send_message(chat_id=chat_id, text=str1 + str2,
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('User notification sent to {}: {}.'.format(chat_id, str2))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def help_message(self, bot, update, chat_id=0):
+    def help_message(self, update, context, chat_id=0):
         """Prints a help message."""
         chat_id = self.get_chat_id(update, chat_id)
         str_out = 'Ask me for *status updates* using: "status" or "/status" or "s".\n'
@@ -724,12 +753,17 @@ class LabBot:
         str_out += 'n del 1  _(delete notification 1)_\n'
         str_out += 'n deact all  _(deactivate all notifications)_\n'
         str_out += 'n act 1 2 3   _(activate notifications 1,2, and 3)_'
-        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
+        context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_sensors(self, bot, update, args=[], chat_id=0, error_str=""):
+    def status_sensors(self, update, context, args=[], chat_id=0, error_str=""):
+        if not args:
+            args = context.args
+        if not args:
+            args = []
+
         str_out = error_str
         if self.LOG_last_checked:
             str_out += "*{}*".format(self.date_format_bot(self.LOG_last_checked))
@@ -799,37 +833,37 @@ class LabBot:
                             column_name_nice = cfg.LOG_NAMES_REPLACEMENT(column_name)
                             str_out += "\n*{}*: {}  _({})_".format(
                                 column_name_nice,
-                                self.replace_lowerthan(value).item(),
+                                self.replace_lowerthan(value).values[0],
                                 self.date_format_bot(date_last_measured)
                             )
 
         chat_id = self.get_chat_id(update, chat_id)
-        bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
+        context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
         logging.info('Status sent to {}'.format(chat_id))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_bakeout(self, bot, update, chat_id=0, error_str=""):
+    def status_bakeout(self, update, context, chat_id=0, error_str=""):
         chat_id = self.get_chat_id(update, chat_id)
-        bot.send_message(chat_id=chat_id, text='Sorry, Bakeout-Status is not implemented yet. ',
+        context.bot.send_message(chat_id=chat_id, text='Sorry, Bakeout-Status is not implemented yet. ',
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('Bakeout-status (not implemented) sent to {}'.format(chat_id))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_photo(self, bot, update, chat_id=0, error_str=""):
+    def status_photo(self, update, context, chat_id=0, error_str=""):
         chat_id = self.get_chat_id(update, chat_id)
-        bot.send_message(chat_id=chat_id, text='Sorry, this is not implemented yet. ',
+        context.bot.send_message(chat_id=chat_id, text='Sorry, this is not implemented yet. ',
                          parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
         logging.info('Photo (not implemented) sent to {}.'.format(chat_id))
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def active_warnings(self, bot, update, args=[], chat_id=0):
-        self.status_error(bot, update, args, chat_id, send_all=True)
+    def active_warnings(self, update, context, chat_id=0):
+        self.status_error(update, context, chat_id, send_all=True)
 
-    def status_error(self, bot, update=None, args=[], chat_id=0, send_all=False):
+    def status_error(self, update=None, context=None, chat_id=0, send_all=False):
         """sends error messages. If send_all is True, then a list of all errors will be sent"""
         now = datetime.datetime.now()
         str_out = ''
@@ -866,24 +900,24 @@ class LabBot:
                         str_out += 'unknown.'
 
                 if not send_all:
-                    bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                    bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+                    self.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                    self.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
                     self.ERRORS_checks[error][chat_id]['sendNext'] = now + \
                         datetime.timedelta(minutes=cfg.WARNING_SEND_EVERY_MINUTES)
                     self.ERRORS_checks[error][chat_id]['timesSent'] += 1
                     logging.info('Warning message "{}" sent to {}.'.format(error, chat_id))
                     errors_sent = True
             if errors_sent:
-                self.status_sensors(bot, None, chat_id=chat_id)
+                self.status_sensors(None, context, chat_id=chat_id)
             if send_all:
                 if str_out:
                     str_out = '*Active warning messages:*' + str_out
-                    bot.send_message(chat_id=chat_id_request, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+                    self.bot.send_message(chat_id=chat_id_request, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
                 else:
-                    bot.send_message(chat_id=chat_id_request, text='No active warning messages.', parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+                    self.bot.send_message(chat_id=chat_id_request, text='No active warning messages.', parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
                 logging.info('List of warning messages sent to {}.'.format(chat_id_request))
 
-    def status_error_off(self, bot, errors_off=[], errors_off_only_quiet=[]):
+    def status_error_off(self, errors_off=[], errors_off_only_quiet=[]):
         """resets errors and sends de-warning message."""
         for error, error_off_only_quiet in zip(errors_off, errors_off_only_quiet):
             for chat_id in cfg.LIST_OF_USERS:
@@ -894,18 +928,18 @@ class LabBot:
                     str_out = cfg.WARNING_OFF_PRE + cfg.WARNING_OFF_MESSAGES[error]
                     if error_off_only_quiet:
                         str_out += cfg.WARNING_OFF_MESSAGE_ONLY_QUIET
-                    bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                    bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
+                    self.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                    self.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN)
                     logging.info('De-warning message "{}" sent to {}.'.format(error, chat_id))
 
                 if dewarning_sent:
-                    self.status_sensors(bot, None, chat_id=chat_id)
+                    self.status_sensors(None, None, chat_id=chat_id)
 
             self.error_remove(error)
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_graph_no_data(self, bot, update, args=[], chat_id=0, from_date=None, to_date=None):
+    def status_graph_no_data(self, update, context, args=[], chat_id=0, from_date=None, to_date=None):
         """sends a message that no data is available"""
         d1 = ""
         d2 = ""
@@ -913,15 +947,19 @@ class LabBot:
             d1 = from_date.strftime("%Y-%m-%d %H:%M:%S")
         if to_date:
             d2 = to_date.strftime("%Y-%m-%d %H:%M:%S")
-        bot.send_message(chat_id=chat_id, text='No data available between {} and {}.'.format(
+        context.bot.send_message(chat_id=chat_id, text='No data available between {} and {}.'.format(
             d1, d2), reply_markup=self.reply_markup)
         logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
 
     @restricted
     @send_action(ChatAction.UPLOAD_PHOTO)
-    def status_graph(self, bot, update, args=[], chat_id=0, error_str=""):
+    def status_graph(self, update, context, args=[], chat_id=0, error_str=""):
+        if not args:
+            args = context.args
+        if not args:
+            args = []
         chat_id = self.get_chat_id(update, chat_id)
-        bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
+        context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
 
         now = datetime.datetime.now()
         bio = io.BytesIO()
@@ -981,7 +1019,7 @@ class LabBot:
 
         data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
         if data is None:
-            self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
+            self.status_graph_no_data(update, context, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
         # filter date range
         # data = data[from_date:to_date]
@@ -990,7 +1028,7 @@ class LabBot:
         data = data[(data.index > from_date) & (data.index < to_date)]
 
         if not data.shape[0]:
-            self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
+            self.status_graph_no_data(update, context, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
 
         fig, axs = plt.subplots(
@@ -1024,7 +1062,7 @@ class LabBot:
                 data.plot(y=c, ax=axs[i, 0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
 
         if not total_count:
-            self.status_graph_no_data(bot, update, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
+            self.status_graph_no_data(update, context, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
             return False
 
         axs[-1, 0].set_xlabel('')
@@ -1033,7 +1071,7 @@ class LabBot:
         # fig.subplots_adjust(wspace=0, hspace=0)
         plt.savefig(bio, format='png', dpi=100)
         bio.seek(0)
-        bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
+        context.bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
         plt.close()
         logging.info('Graph sent to {}.'.format(chat_id))
 
@@ -1273,8 +1311,8 @@ class LabBot:
                 self.error_add(cfg.ERROR_UNKNOWN_VALUES, str_columns)
 
         # send warnings
-        self.status_error_off(self.bot, errors_off, errors_off_only_quiet)
-        self.status_error(self.bot)
+        self.status_error_off(errors_off, errors_off_only_quiet)
+        self.status_error()
 
         # save config if there were any changes
         if self.save_config or self.ERRORS_checks != error_checks_old:
@@ -1325,13 +1363,13 @@ class LabBot:
                         self.MEASURE_requests[entity]['value'] = value
                         str_out = "*{}*: {}  _({})_".format(
                             column_name_nice,
-                            self.replace_lowerthan(value).item(),
+                            self.replace_lowerthan(value).values[0],
                             self.date_format_bot(date_measured)
                         )
                         for chat_id in chat_ids:
                             logging.info("Measure request ({}) by {} successful: {}".format(
                                 entity, chat_id,
-                                self.replace_lowerthan(value).item())
+                                self.replace_lowerthan(value).values[0])
                             )
                             self.measure_send_result(self.bot, update=None, args=[str_out], chat_id=chat_id)
                         continue
