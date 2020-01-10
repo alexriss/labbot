@@ -768,7 +768,8 @@ class LabBot:
     @send_action(ChatAction.TYPING)
     def status_sensors(self, update, context, args=[], chat_id=0, error_str=""):
         if not args:
-            args = context.args
+            if context:
+                args = context.args
         if not args:
             args = []
 
@@ -846,7 +847,7 @@ class LabBot:
                             )
 
         chat_id = self.get_chat_id(update, chat_id)
-        context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
+        self.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
         logging.info('Status sent to {}'.format(chat_id))
 
