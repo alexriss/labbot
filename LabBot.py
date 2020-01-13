@@ -496,9 +496,8 @@ class LabBot:
         if not args:
             args = context.args
         if not args:
-            args = []
-        if len(args) == 0:
-            args[0] = 0
+            args = [0]
+
         now = datetime.datetime.now()
         chat_id = self.get_chat_id(update, chat_id)
 
