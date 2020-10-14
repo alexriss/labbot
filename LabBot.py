@@ -48,7 +48,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.20
+        self.__version__ = 0.21
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -751,6 +751,8 @@ class LabBot:
         str_out += 'The graph and status commands both support extra arguments'
         str_out += 'specifying the sensor data that should be plotted.\n'
         str_out += '"g afm prep tafm" or "g all".\n\n'
+        str_out += 'You can even do some fits in the graph module: "g tafm fit -0.5 0.5 2" for fitting of the temperature data from 0.5 hours ago to 0.5 hours into the future with a 2nd order polynomial.\n'
+        str_out += 'A shortcut is "g tafm fit 0.5" for the same fit but with an order 1 polynomial as default.\n\n'
         str_out += '*User notifications* can be set up using:\n'
         str_out += '/n afm < 1e-10\n'
         str_out += 'n afm lt 1e-10\n'
@@ -976,13 +978,18 @@ class LabBot:
         # default values
         from_date = now - datetime.timedelta(days=cfg.GRAPH_DEFAULT_DAYS)
         to_date = now + datetime.timedelta(hours=1)  # we want some extra time, just in case
+        from_date_interp = now
+        to_date_interp = now
+        order_interp = 1  # linear
 
         # on cell phones - and + often add spaces afterwards
         args = " ".join(args).replace('- ', '-').replace('+ ', '+').replace(',', '.').split()
 
+        # parse args, get columns to plot
         columns_toplot = []
         if 'all' in args:
             columns_toplot = self.LOG_labels
+            args.remove('all')
         else:
             args_to_delete = []
             for i, arg in enumerate(args):
@@ -995,7 +1002,15 @@ class LabBot:
         if not len(columns_toplot):
             columns_toplot = cfg.GRAPH_DEFAULT_COLUMNS
 
-        # parse args
+        # parse args, get fit information
+        args_interp = []
+        if 'fit' in args:
+            pos = args.index('fit')
+            args_interp = args[pos + 1: pos + 4]
+            for i in range(pos, pos + len(args_interp) + 1)[::-1]:
+                del args[i]
+
+        # parse args, get time limits
         if len(args) >= 1:
             for i, a in enumerate(args):
                 try:
@@ -1013,17 +1028,60 @@ class LabBot:
             except Exception:
                 logging.error('Error when converting {} to datetime.'.format(args[0]))
                 logging.error(traceback.format_exc())
-        if len(args) >= 2:
+        if len(args) >= 2:  # to date
             try:
                 to_date = datemath.dm(args[1], type='datetime').astimezone().replace(tzinfo=None)
             except datemath.helpers.DateMathException:
-                logging.error('Error when converting {} to datetime.'.format(args[0]))
+                logging.error('Error when converting {} to datetime.'.format(args[1]))
             except Exception:
                 logging.error('Error when converting {} to datetime.'.format(args[1]))
                 logging.error(traceback.format_exc())
 
+        if len(args_interp) >= 1:  # interpolation from_date and to_date
+            try:
+                try:
+                    args_interp[0] = str(float(args_interp[0])) +'h'  # "20" means "20h"
+                except ValueError:
+                    pass
+                args_interp[0] = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"-\1", args_interp[0])  # "20h" means "-20h"
+
+                from_date_interp = datemath.dm(args_interp[0], type='datetime').astimezone().replace(tzinfo=None)
+            except datemath.helpers.DateMathException:
+                logging.error('Error when converting {} to datetime.'.format(args_interp[0]))
+            except Exception:
+                logging.error('Error when converting {} to datetime.'.format(args_interp[0]))
+                logging.error(traceback.format_exc())
+        if len(args_interp) >= 2:  # interpolation from_date and to_date
+            try:
+                try:
+                    args_interp[1] = str(float(args_interp[1])) +'h'  # "20" means "20h"
+                except ValueError:
+                    pass
+                args_interp[1] = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"+\1", args_interp[1])  # here "20h" means "+20h"
+                to_date_interp = datemath.dm(args_interp[1], type='datetime').astimezone().replace(tzinfo=None)
+            except datemath.helpers.DateMathException:
+                logging.error('Error when converting {} to datetime.'.format(args_interp[1]))
+            except Exception:
+                logging.error('Error when converting {} to datetime.'.format(args_interp[1]))
+                logging.error(traceback.format_exc())
+        else:
+            to_date_interp = now + (now - from_date_interp)  # if no to_date is specified, use the same range for extrapolation
+
+        if len(args_interp) >= 3:   # interpolation order
+            try:
+                order_interp = int(args_interp[2])
+            except ValueError:
+                logging.error('Error when converting {} to interpolation order.'.format(args_interp[2]))
+            except Exception:
+                logging.error('Error when converting {} to interpolation order.'.format(args_interp[2]))
+
+        # small extra sanity checks
         if from_date > to_date:
             from_date, to_date = to_date, from_date
+        if from_date_interp > to_date_interp:
+            from_date_interp, to_date_interp = to_date_interp, from_date_interp
+        if order_interp < 1:
+            order_interp = 1
 
         data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
         if data is None:
@@ -1034,6 +1092,12 @@ class LabBot:
         # the slicing causes problems for nonmonotonous data,
         # which can happen when DST ends or when the log files are non-monotonous
         data = data[(data.index > from_date) & (data.index < to_date)]
+        data_interp = data[(data.index > from_date_interp) & (data.index < to_date_interp)]
+
+        if from_date_interp < now < to_date_interp and data_interp.shape[0] > 1:
+            do_interp = True
+        else:
+            do_interp = False
 
         if not data.shape[0]:
             self.status_graph_no_data(update, context, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
@@ -1061,6 +1125,7 @@ class LabBot:
             if c in cfg.GRAPH_IGNORE_LOWERTHAN:
                 limit = cfg.GRAPH_IGNORE_LOWERTHAN[c]
                 data[c][data[c] <= limit] = np.nan
+                data_interp[c][data_interp[c] <= limit] = np.nan
             logy = False
             if c in cfg.GRAPH_LOG_COLUMNS:
                 logy = True
@@ -1068,6 +1133,24 @@ class LabBot:
             total_count += count
             if count:
                 data.plot(y=c, ax=axs[i, 0], color=colors[c], ls='-', lw=2, ms=0, legend=None, logy=logy)
+                axs[i, 0].grid(which="major", alpha=0.3)
+                axs[i, 0].grid(which="minor", alpha=0.1)
+
+            # interpolation
+            if do_interp and data_interp[c].count():
+                x = pd.to_numeric(data_interp.index)
+                y = data_interp[c]
+                x_start = x[0]
+                x -= x_start
+
+                yfit_func = np.poly1d(np.polyfit(x, y, order_interp))
+                xfit = pd.to_numeric(pd.date_range(from_date_interp, to_date_interp, periods=100)) - x_start
+                yfit = yfit_func(xfit)
+                xplot = pd.to_datetime(xfit + x_start)
+
+                if logy:  # can plot any values <= 0
+                    yfit[yfit <= 0] = np.nan
+                axs[i,0].plot(xplot, yfit, color=colors[c], ls='--', lw=1, ms=0, alpha=0.5, label=None)
 
         if not total_count:
             self.status_graph_no_data(update, context, args=args, chat_id=chat_id, from_date=from_date, to_date=to_date)
