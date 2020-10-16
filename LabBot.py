@@ -48,7 +48,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.21
+        self.__version__ = 0.22
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -738,6 +738,7 @@ class LabBot:
         """Prints a help message."""
         chat_id = self.get_chat_id(update, chat_id)
         str_out = 'Ask me for *status updates* using: "status" or "/status" or "s".\n'
+        str_out += '"s 0.5" will display the slopes for the last 0.5 hours.\n\n'
         str_out += 'Pressure, temperature and logging warnings will be sent every {:d} minutes. '.format(
             cfg.WARNING_SEND_EVERY_MINUTES)
         str_out += 'Use /l or "limits" to see warning limits.\n\n'
@@ -765,6 +766,41 @@ class LabBot:
         context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
 
+    def _calculate_gradients(self, columns, gradient_dates):
+        gradients = {}
+        from_date = gradient_dates[0]
+        if len(gradient_dates) >= 2:
+            to_date = gradient_dates[1]
+        else:
+            to_date = datetime.datetime.now() + datetime.timedelta(hours=1)  # we want some extra time, just in case
+        data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
+        if data is None:
+            return gradients
+
+        data = data[(data.index > from_date) & (data.index < to_date)]
+        if not data.shape[0]:
+            return gradients
+
+        x = pd.to_numeric(data.index) / 1e9  # convert to seconds
+        x_start = x[0]
+        x -= x_start
+        for c in columns:
+            if c not in data:
+                continue
+            xfit = x[:]
+            yfit = data[c]
+            if c in cfg.GRAPH_IGNORE_LOWERTHAN:
+                limit = cfg.GRAPH_IGNORE_LOWERTHAN[c]
+                idx = yfit > limit
+                xfit = xfit[idx]
+                yfit = yfit[idx]
+
+            if len(xfit):
+                fit = np.polyfit(xfit, yfit, 1)
+                gradients[c] = fit[0] * 60
+
+        return gradients
+
     @restricted
     @send_action(ChatAction.TYPING)
     def status_sensors(self, update, context, args=[], chat_id=0, error_str=""):
@@ -783,7 +819,7 @@ class LabBot:
             str_out += ' ' + cfg.WARNING_SYMBOL
 
         query_string = ' '.join(args)
-        query_string = re.sub(r'[^\w\s]', ' ', query_string.replace('-', ''))
+        query_string = re.sub(r'[^\w\s\.]', ' ', query_string.replace('-', ''))
         query_items = query_string.split()
 
         columns = []
@@ -799,6 +835,19 @@ class LabBot:
                     columns.append(c)
         if not len(columns):
             columns = cfg.STATUS_DEFAULT_COLUMNS.copy()
+
+        # see if we have numbers - these are times for gradient calculation
+        gradient_dates = []
+        gradients = {}
+        for q in query_items:
+            if re.match(r'[-+]?[0-9].\.?[0-9]*[YymMdDwHhSs]$', q) or re.match(r'[-+]?[0-9]*\.?[0-9]*$', q):
+                gradient_dates.append(self._get_datetime_from_string(q))
+        if not len(gradient_dates):
+            if "g" in query_items or "grad" in query_items or "gradient" in query_items:
+                gradient_dates.append(datetime.datetime.now() - datetime.timedelta(hours=1))
+
+        if len(gradient_dates):
+            gradients = self._calculate_gradients(columns, gradient_dates)
 
         # check if there are any columns associated with errors
         columns_error = []
@@ -820,10 +869,13 @@ class LabBot:
                 str_error = ''
                 if c in columns_error:
                     str_error = " " + cfg.WARNING_SYMBOL
+                grad_str = ""
+                if c in gradients:
+                    grad_str = "      _slope: {:.{prec}g} min⁻¹ _".format(gradients[c], prec=cfg.FLOAT_PRECISION_BOT_GRADIENT)
                 if isinstance(val, str):
-                    str_out += "\n*{}*: {}{}".format(self.LOG_labels_nice[c], val, str_error)
+                    str_out += "\n*{}*: {}{}{}".format(self.LOG_labels_nice[c], val, grad_str, str_error)
                 else:
-                    str_out += "\n*{}*: {:.{prec}g}{}".format(self.LOG_labels_nice[c], val, str_error, prec=cfg.FLOAT_PRECISION_BOT)
+                    str_out += "\n*{}*: {:.{prec}g}{}{}".format(self.LOG_labels_nice[c], val, grad_str, str_error, prec=cfg.FLOAT_PRECISION_BOT)
             else:
                 # check the message requests - here we need to read the log file
                 for entity, cm_dict in cfg.MEASURE_REQUESTS.items():
@@ -961,6 +1013,28 @@ class LabBot:
             d1, d2), reply_markup=self.reply_markup)
         logging.info('Graph cannot be sent to {}: No data available between {} and {}.'.format(chat_id, d1, d2))
 
+    def _get_datetime_from_string(self, arg, future=False):
+        try:
+            arg = str(float(arg)) +'h'  # "20" means "20h"
+        except ValueError:
+            pass
+        if future:
+            arg = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"+\1", arg)  # "20h" means "+20h"
+        else:
+            arg = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"-\1", arg)  # "20h" means "-20h"
+        
+        d = None
+        try:
+            # dm gives UTC timezone, so first we convert to local timezone and then
+            # remove the timezon info (so we can compare with the logged entries)
+            d = datemath.dm(arg, type='datetime').astimezone().replace(tzinfo=None)
+        except datemath.helpers.DateMathException:
+            logging.error('Error when converting {} to datetime.'.format(arg))
+        except Exception:
+            logging.error('Error when converting {} to datetime.'.format(arg))
+            logging.error(traceback.format_exc())
+        return d
+
     @restricted
     @send_action(ChatAction.UPLOAD_PHOTO)
     def status_graph(self, update, context, args=[], chat_id=0, error_str=""):
@@ -978,9 +1052,10 @@ class LabBot:
         # default values
         from_date = now - datetime.timedelta(days=cfg.GRAPH_DEFAULT_DAYS)
         to_date = now + datetime.timedelta(hours=1)  # we want some extra time, just in case
-        from_date_interp = now
-        to_date_interp = now
+        from_date_interp = now - datetime.timedelta(hours=0.2)
+        to_date_interp = now + datetime.timedelta(hours=2)
         order_interp = 1  # linear
+        do_interp = False
 
         # on cell phones - and + often add spaces afterwards
         args = " ".join(args).replace('- ', '-').replace('+ ', '+').replace(',', '.').split()
@@ -1005,6 +1080,7 @@ class LabBot:
         # parse args, get fit information
         args_interp = []
         if 'fit' in args:
+            do_interp = True
             pos = args.index('fit')
             args_interp = args[pos + 1: pos + 4]
             for i in range(pos, pos + len(args_interp) + 1)[::-1]:
@@ -1012,60 +1088,22 @@ class LabBot:
 
         # parse args, get time limits
         if len(args) >= 1:
-            for i, a in enumerate(args):
-                try:
-                    args[i] = str(float(args[i])) +'h'  # "20" means "20h"
-                except ValueError:
-                    pass
-                args[i] = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"-\1", args[i])  # "20h" means "-20h"
-                if i>=1: break
-            try:
-                # dm gives UTC timezone, so first we convert to local timezone and then
-                # remove the timezon info (so we can compare with the logged entries)
-                from_date = datemath.dm(args[0], type='datetime').astimezone().replace(tzinfo=None)
-            except datemath.helpers.DateMathException:
-                logging.error('Error when converting {} to datetime.'.format(args[0]))
-            except Exception:
-                logging.error('Error when converting {} to datetime.'.format(args[0]))
-                logging.error(traceback.format_exc())
+            r = self._get_datetime_from_string(args[0])
+            if r:
+                from_date = r
         if len(args) >= 2:  # to date
-            try:
-                to_date = datemath.dm(args[1], type='datetime').astimezone().replace(tzinfo=None)
-            except datemath.helpers.DateMathException:
-                logging.error('Error when converting {} to datetime.'.format(args[1]))
-            except Exception:
-                logging.error('Error when converting {} to datetime.'.format(args[1]))
-                logging.error(traceback.format_exc())
+            r = self._get_datetime_from_string(args[1])
+            if r:
+                to_date = r
 
         if len(args_interp) >= 1:  # interpolation from_date and to_date
-            try:
-                try:
-                    args_interp[0] = str(float(args_interp[0])) +'h'  # "20" means "20h"
-                except ValueError:
-                    pass
-                args_interp[0] = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"-\1", args_interp[0])  # "20h" means "-20h"
-
-                from_date_interp = datemath.dm(args_interp[0], type='datetime').astimezone().replace(tzinfo=None)
-            except datemath.helpers.DateMathException:
-                logging.error('Error when converting {} to datetime.'.format(args_interp[0]))
-            except Exception:
-                logging.error('Error when converting {} to datetime.'.format(args_interp[0]))
-                logging.error(traceback.format_exc())
+            r = self._get_datetime_from_string(args_interp[0])
+            if r:
+                from_date_interp = r
         if len(args_interp) >= 2:  # interpolation from_date and to_date
-            try:
-                try:
-                    args_interp[1] = str(float(args_interp[1])) +'h'  # "20" means "20h"
-                except ValueError:
-                    pass
-                args_interp[1] = re.sub(r"^([0-9]*\.?[0-9]+[YymMdDwHhSs])$", r"+\1", args_interp[1])  # here "20h" means "+20h"
-                to_date_interp = datemath.dm(args_interp[1], type='datetime').astimezone().replace(tzinfo=None)
-            except datemath.helpers.DateMathException:
-                logging.error('Error when converting {} to datetime.'.format(args_interp[1]))
-            except Exception:
-                logging.error('Error when converting {} to datetime.'.format(args_interp[1]))
-                logging.error(traceback.format_exc())
-        else:
-            to_date_interp = now + (now - from_date_interp)  # if no to_date is specified, use the same range for extrapolation
+            r = self._get_datetime_from_string(args_interp[1], future=True)
+            if r:
+                to_date_interp = r
 
         if len(args_interp) >= 3:   # interpolation order
             try:
@@ -1094,9 +1132,7 @@ class LabBot:
         data = data[(data.index > from_date) & (data.index < to_date)]
         data_interp = data[(data.index > from_date_interp) & (data.index < to_date_interp)]
 
-        if from_date_interp < now < to_date_interp and data_interp.shape[0] > 1:
-            do_interp = True
-        else:
+        if not (from_date_interp < now < to_date_interp and data_interp.shape[0] > 1):
             do_interp = False
 
         if not data.shape[0]:

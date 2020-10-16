@@ -30,6 +30,7 @@ WARNING_NOLOG_MINUTES = 10   # if there are no logs for this amount of minutes, 
 WARNING_SEND_EVERY_MINUTES = 60  # send warning every n number of minutes (if it still persists)
 
 FLOAT_PRECISION_BOT = 4  # significant digits of floats for display
+FLOAT_PRECISION_BOT_GRADIENT = 2  # significant digits of floats for display of gradients
 DATE_FMT_BOT = "%Y-%m-%d %H:%M:%S"
 DATE_FMT_BOT_SHORT_HOURS = 6  # use short date format if less than n hours have elapsed
 DATE_FMT_BOT_SHORT = ("%H:%M:%S")  # use short date format if less than DATE_FMT_BOT_SHORT_HOURS hours have elapsed
