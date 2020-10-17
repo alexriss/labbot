@@ -143,11 +143,15 @@ LOGGING_FILENAME = ("logs/log_%Y-%m.log")  # filename for logging of app informa
 LOGGING_ERROR_EVERY_MINUTES = 15  # write warnings to log every n minutes
 
 STATUS_DEFAULT_COLUMNS = ["PAFM[mbar]", "PPRP[mbar]", "TAFM[K]", "LHE[mm]"]
+STATUS_SLOPE_DEFAULT_FROM_HOURS = 0.1  # slope in status message is displayed based on a fit this many hours back
 
 GRAPH_DEFAULT_DAYS = 0.5  # default range for graphs (i.e. this many days into the past)
 GRAPH_DEFAULT_COLUMNS = ["PAFM[mbar]", "PPRP[mbar]", "TAFM[K]", "TSAM[C]"]
 GRAPH_MAX_POINTS = 2880  # maximum number of points to plot (if we have more data, it will e averaged)
 GRAPH_DAYS_MAX = 31  # maximum number of days to plot
+GRAPH_FIT_DEFAULT_FROM_HOURS = 0.1  # fit in graphs is based on data this many hours back
+GRAPH_FIT_DEFAULT_TO_HOURS = 2   # fit in graphs extends this many hours into the future
+GRAPH_FIT_DEFAULT_ORDER = 1   # default fit order for polynomial fit in graphs
 GRAPH_LOG_COLUMNS = ["PAFM[mbar]", "PPRP[mbar]"]  # use logarothmic y-scale for these indices
 # ignore values smaller or equal than the values given here (errors can be encoded as negative values)
 GRAPH_IGNORE_LOWERTHAN = {

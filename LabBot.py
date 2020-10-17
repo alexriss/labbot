@@ -844,7 +844,7 @@ class LabBot:
                 gradient_dates.append(self._get_datetime_from_string(q))
         if not len(gradient_dates):
             if "g" in query_items or "grad" in query_items or "gradient" in query_items:
-                gradient_dates.append(datetime.datetime.now() - datetime.timedelta(hours=1))
+                gradient_dates.append(datetime.datetime.now() - datetime.timedelta(hours=cfg.STATUS_SLOPE_DEFAULT_FROM_HOURS))
 
         if len(gradient_dates):
             gradients = self._calculate_gradients(columns, gradient_dates)
@@ -1052,9 +1052,9 @@ class LabBot:
         # default values
         from_date = now - datetime.timedelta(days=cfg.GRAPH_DEFAULT_DAYS)
         to_date = now + datetime.timedelta(hours=1)  # we want some extra time, just in case
-        from_date_interp = now - datetime.timedelta(hours=0.2)
-        to_date_interp = now + datetime.timedelta(hours=2)
-        order_interp = 1  # linear
+        from_date_interp = now - datetime.timedelta(hours=cfg.GRAPH_FIT_DEFAULT_FROM_HOURS)
+        to_date_interp = now + datetime.timedelta(hours=cfg.GRAPH_FIT_DEFAULT_TO_HOURS)
+        order_interp = cfg.GRAPH_FIT_DEFAULT_ORDER
         do_interp = False
 
         # on cell phones - and + often add spaces afterwards
@@ -1119,7 +1119,7 @@ class LabBot:
         if from_date_interp > to_date_interp:
             from_date_interp, to_date_interp = to_date_interp, from_date_interp
         if order_interp < 1:
-            order_interp = 1
+            order_interp = cfg.GRAPH_FIT_DEFAULT_ORDER
 
         data = self.read_logs(from_date=from_date, to_date=to_date)  # read the necessary log files
         if data is None:
