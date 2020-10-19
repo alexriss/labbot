@@ -84,14 +84,17 @@ class LabBot:
         self.setup_handlers()
 
         button_list = [
-            telegram.InlineKeyboardButton("status", callback_data='/status'),
             telegram.InlineKeyboardButton("graph", callback_data='/graph'),
+            telegram.InlineKeyboardButton("graph+", callback_data='/graph+'),
             telegram.InlineKeyboardButton("notify", callback_data='/n'),
+            telegram.InlineKeyboardButton("warnings", callback_data='/warning'),
+            telegram.InlineKeyboardButton("status", callback_data='/status'),
+            telegram.InlineKeyboardButton("status+", callback_data='/status+'),
+            telegram.InlineKeyboardButton("help", callback_data='/help')
             # telegram.InlineKeyboardButton("bakeout", callback_data='/bakeout'),
             # telegram.InlineKeyboardButton("photo", callback_data='/photo')
-            telegram.InlineKeyboardButton("help", callback_data='/help')
         ]
-        self.reply_markup = telegram.InlineKeyboardMarkup(self.build_menu(button_list, n_cols=4))
+        self.reply_markup = telegram.InlineKeyboardMarkup(self.build_menu(button_list, n_cols=4, new_cols_at=[3]))
 
         logging.info('{} set up.'.format(cfg.BOT_ID))
 
@@ -251,8 +254,12 @@ class LabBot:
         querydata = update.callback_query.data
         if querydata == '/status':
             self.status_sensors(update, context)
+        if querydata == '/status+':
+            self.status_sensors(update, context, args=["grad"])
         elif querydata == '/graph':
             self.status_graph(update, context)
+        elif querydata == '/graph+':
+            self.status_graph(update, context, args=["fit"])
         elif querydata == '/bakeout':
             self.status_bakeout(update, context)
         elif querydata == '/photo':
@@ -261,6 +268,8 @@ class LabBot:
             self.help_message(update, context)
         elif querydata == '/n':
             self.user_notifications_manage(update, context, args=['list'])
+        elif querydata == '/warning':
+            self.active_warnings(update, context)
 
     @restricted
     @send_action(ChatAction.TYPING)
@@ -314,6 +323,7 @@ class LabBot:
 
     def build_menu(self, buttons,
                    n_cols,
+                   new_cols_at = [],
                    header_buttons=None,
                    footer_buttons=None):
         menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
@@ -843,7 +853,7 @@ class LabBot:
             if re.match(r'[-+]?[0-9].\.?[0-9]*[YymMdDwHhSs]$', q) or re.match(r'[-+]?[0-9]*\.?[0-9]*$', q):
                 gradient_dates.append(self._get_datetime_from_string(q))
         if not len(gradient_dates):
-            if "g" in query_items or "grad" in query_items or "gradient" in query_items:
+            if "g" in query_items or "grad" in query_items or "gradient" in query_items or 'fit' in query_items or 'f' in query_items or "slope" in query_items:
                 gradient_dates.append(datetime.datetime.now() - datetime.timedelta(hours=cfg.STATUS_SLOPE_DEFAULT_FROM_HOURS))
 
         if len(gradient_dates):
@@ -1079,12 +1089,14 @@ class LabBot:
 
         # parse args, get fit information
         args_interp = []
-        if 'fit' in args:
-            do_interp = True
-            pos = args.index('fit')
-            args_interp = args[pos + 1: pos + 4]
-            for i in range(pos, pos + len(args_interp) + 1)[::-1]:
-                del args[i]
+        for keyword in ['fit', 'gradient', 'grad', 'slope', 'f', 'g']:
+            if keyword in args:
+                do_interp = True
+                pos = args.index(keyword)
+                args_interp = args[pos + 1: pos + 4]
+                for i in range(pos, pos + len(args_interp) + 1)[::-1]:
+                    del args[i]
+                break
 
         # parse args, get time limits
         if len(args) >= 1:
