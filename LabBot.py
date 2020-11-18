@@ -850,7 +850,7 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.TYPING)
-    def status_sensors(self, update, context, args=[], chat_id=0, error_str=""):
+    def status_sensors(self, update, context, args=[], chat_id=0, error_str="", add_to_last=True):
         if not args:
             if context:
                 args = context.args
@@ -858,7 +858,9 @@ class LabBot:
             args = []
         chat_id = self.get_chat_id(update, chat_id)
 
-        self.add_to_last_commands(chat_id, ["status", args])
+        # save in last commands list
+        if add_to_last:
+            self.add_to_last_commands(chat_id, ["status", args])
 
         str_out = error_str
         if self.LOG_last_checked:
@@ -1019,7 +1021,7 @@ class LabBot:
                     logging.info('Warning message "{}" sent to {}.'.format(error, chat_id))
                     errors_sent = True
             if errors_sent:
-                self.status_sensors(None, context, chat_id=chat_id)
+                self.status_sensors(None, context, chat_id=chat_id, add_to_last=False)
             if send_all:
                 if str_out:
                     str_out = '*Active warning messages:*' + str_out
@@ -1044,7 +1046,7 @@ class LabBot:
                     logging.info('De-warning message "{}" sent to {}.'.format(error, chat_id))
 
                 if dewarning_sent:
-                    self.status_sensors(None, None, chat_id=chat_id)
+                    self.status_sensors(None, None, chat_id=chat_id, add_to_last=False)
 
             self.error_remove(error)
 
@@ -1086,7 +1088,7 @@ class LabBot:
 
     @restricted
     @send_action(ChatAction.UPLOAD_PHOTO)
-    def status_graph(self, update, context, args=[], chat_id=0, error_str=""):
+    def status_graph(self, update, context, args=[], chat_id=0, error_str="", add_to_last=True):
         if not args:
             args = context.args
         if not args:
@@ -1095,7 +1097,8 @@ class LabBot:
         context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
 
         # save in last commands list
-        self.add_to_last_commands(chat_id, ["graph", args])
+        if add_to_last:
+            self.add_to_last_commands(chat_id, ["graph", args])
 
         now = datetime.datetime.now()
         bio = io.BytesIO()
@@ -1295,9 +1298,11 @@ class LabBot:
             if res is not None:
                 c, c_args = res
                 if c == "status":
+                    context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
                     self.status_sensors(update, context, args=c_args, chat_id=chat_id, error_str=error_str)
                     num_sent += 1
                 elif c == "graph":
+                    context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
                     self.status_graph(update, context, args=c_args, chat_id=chat_id, error_str=error_str)
                     num_sent += 1
         if num_sent == 0:
