@@ -41,6 +41,7 @@ import traceback
 import telegram
 from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler, BaseFilter, Filters
 from telegram import ChatAction
+from collections import deque
 
 # import configuration
 import LabBot_config as cfg
@@ -48,7 +49,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.22
+        self.__version__ = 0.23
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -75,7 +76,14 @@ class LabBot:
         # set default values for user config
         for user in cfg.LIST_OF_USERS:
             if user not in self.USER_config:
-                self.USER_config[user] = {'quiet_times': True}
+                self.USER_config[user] = {
+                    'quiet_times': True,
+                    'last_commands': deque(maxlen=cfg.NUM_SAVE_LAST_COMMANDS)
+                }
+            if 'last_commands' not in self.USER_config[user]:
+                self.USER_config[user]['last_commands'] = deque(maxlen=cfg.NUM_SAVE_LAST_COMMANDS)
+            while len(self.USER_config[user]['last_commands']) > cfg.NUM_SAVE_LAST_COMMANDS:  # in case the number is decreased in the config
+                self.USER_config[user]['last_commands'].popleft()
 
         self.updater = Updater(token=cfg.BOT_TOKEN, use_context=True)
         self.dispatcher = self.updater.dispatcher
@@ -90,6 +98,7 @@ class LabBot:
             telegram.InlineKeyboardButton("warnings", callback_data='/warning'),
             telegram.InlineKeyboardButton("status", callback_data='/status'),
             telegram.InlineKeyboardButton("status+", callback_data='/status+'),
+            telegram.InlineKeyboardButton("last", callback_data='/last'),
             telegram.InlineKeyboardButton("help", callback_data='/help')
             # telegram.InlineKeyboardButton("bakeout", callback_data='/bakeout'),
             # telegram.InlineKeyboardButton("photo", callback_data='/photo')
@@ -175,17 +184,24 @@ class LabBot:
                     return False
                 return (('graph' in message.text.lower()) or 'g' == message.text.lower())
 
+        class FilterLast(BaseFilter):
+            def filter(self, message):
+                if not message.text:
+                    return False
+                return (('last' in message.text.lower()) or 'l' == message.text.lower())
+
         self.commands = [  # will be used in the message_command_handler
             {'keywords': ['start', 'hello', 'hi'], 'func': self.hello_handler},
             {'keywords': ['temp', 'temperature', 't', 's', 'status',
                           'pressure', 'status', 'p'], 'func': self.status_sensors},
             {'keywords': ['graph', 'g'], 'func': self.status_graph},
-            {'keywords': ['limit', 'limits', 'l'], 'func': self.limits_config},
+            {'keywords': ['limit', 'limits'], 'func': self.limits_config},
             {'keywords': ['warning', 'warnings', 'w'], 'func': self.active_warnings},
             {'keywords': ['notify', 'n'], 'func': self.user_notifications_manage},
             {'keywords': ['silence'], 'func': self.silence_errors},
             {'keywords': ['v', 'version'], 'func': self.version_handler},
             {'keywords': ['d', 'time', 'datetime', 'date', 't'], 'func': self.datetime_handler},
+            {'keywords': ['last', 'l', '.'], 'func': self.last_command},
         ]
 
         self.dispatcher.add_handler(CommandHandler(['start', 'hello', 'hi'], self.hello_handler))
@@ -197,12 +213,13 @@ class LabBot:
         self.dispatcher.add_handler(CommandHandler(['notify', 'n'], self.user_notifications_manage))  # uses args
         self.dispatcher.add_handler(CommandHandler(['graph', 'g'], self.status_graph))  # uses args
         self.dispatcher.add_handler(CommandHandler(['warning', 'warnings', 'w'], self.active_warnings))
-        self.dispatcher.add_handler(CommandHandler(['limit', 'limits', 'l'], self.limits_config))
+        self.dispatcher.add_handler(CommandHandler(['limit', 'limits'], self.limits_config))
         self.dispatcher.add_handler(CommandHandler(
             ['status', 'pressure', 'temperature', 'temp', 's', 'p'], self.status_sensors))  # uses args
         self.dispatcher.add_handler(CommandHandler(['bakeout'], self.status_bakeout))
         self.dispatcher.add_handler(CommandHandler(['measure'], self.measure_handler))  # uses args
         self.dispatcher.add_handler(CommandHandler(['photo', 'pic'], self.status_photo))
+        self.dispatcher.add_handler(CommandHandler(['last', 'l'], self.last_command))
 
         self.dispatcher.add_handler(MessageHandler(Filters.command, self.unknown_command_handler))
 
@@ -211,6 +228,7 @@ class LabBot:
         self.dispatcher.add_handler(MessageHandler(FilterPhoto(), self.status_photo))
         self.dispatcher.add_handler(MessageHandler(FilterHelp(), self.help_message))
         self.dispatcher.add_handler(MessageHandler(FilterGraph(), self.status_graph))
+        self.dispatcher.add_handler(MessageHandler(FilterLast(), self.last_command))
         self.dispatcher.add_handler(MessageHandler(Filters.text, self.message_command_handler))
 
         self.dispatcher.add_handler(CallbackQueryHandler(self.callback_handler))
@@ -270,6 +288,8 @@ class LabBot:
             self.user_notifications_manage(update, context, args=['list'])
         elif querydata == '/warning':
             self.active_warnings(update, context)
+        elif querydata == '/last':
+            self.last_command(update, context)
 
     @restricted
     @send_action(ChatAction.TYPING)
@@ -399,6 +419,19 @@ class LabBot:
         except OSError:
             logging.warning('Problem reading log file {}.'.format(fname))
         return firstlast
+
+    def add_to_last_commands(self, user, command):
+        """adds the last command to the user's list of last commands (no change if the last command did not change)"""
+        if len(self.USER_config[user]["last_commands"]) == 0 or self.USER_config[user]["last_commands"][-1] != command:
+            self.USER_config[user]["last_commands"].append(command)
+            self.save_config = True
+
+    def get_from_last_commands(self, user, num):
+        """gets the n-th last commands from the user's list of last commands"""
+        if len(self.USER_config[user]["last_commands"]) >= num:
+            return self.USER_config[user]["last_commands"][-num]
+        else:
+            return None
 
     @restricted
     @send_action(ChatAction.TYPING)
@@ -751,7 +784,7 @@ class LabBot:
         str_out += '"s 0.5" will display the slopes for the last 0.5 hours.\n\n'
         str_out += 'Pressure, temperature and logging warnings will be sent every {:d} minutes. '.format(
             cfg.WARNING_SEND_EVERY_MINUTES)
-        str_out += 'Use /l or "limits" to see warning limits.\n\n'
+        str_out += 'Use "limits" to see warning limits.\n\n'
         str_out += '*Active warning messages* are shown using /w or "warnings".\n\n'
         str_out += 'The active *warnings can be silenced* for n hours using the command "/silence n".\n'
         str_out += 'n=0 will re-enable normal warnings.\n\n'
@@ -772,7 +805,11 @@ class LabBot:
         str_out += 'n list\n'
         str_out += 'n del 1  _(delete notification 1)_\n'
         str_out += 'n deact all  _(deactivate all notifications)_\n'
-        str_out += 'n act 1 2 3   _(activate notifications 1,2, and 3)_'
+        str_out += 'n act 1 2 3   _(activate notifications 1,2, and 3)_\n\n'
+        str_out += '*Last commands* (status and graph) can be executed using:\n'
+        str_out += '"last" or "/l 2" or ". 3 4 5"\n'
+        str_out += 'List all last commands with "last list" or "l l"'
+
         context.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
 
@@ -819,6 +856,9 @@ class LabBot:
                 args = context.args
         if not args:
             args = []
+        chat_id = self.get_chat_id(update, chat_id)
+
+        self.add_to_last_commands(chat_id, ["status", args])
 
         str_out = error_str
         if self.LOG_last_checked:
@@ -909,7 +949,6 @@ class LabBot:
                                 self.date_format_bot(date_last_measured)
                             )
 
-        chat_id = self.get_chat_id(update, chat_id)
         self.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
         logging.info('Status sent to {}'.format(chat_id))
@@ -1054,6 +1093,9 @@ class LabBot:
             args = []
         chat_id = self.get_chat_id(update, chat_id)
         context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
+
+        # save in last commands list
+        self.add_to_last_commands(chat_id, ["graph", args])
 
         now = datetime.datetime.now()
         bio = io.BytesIO()
@@ -1213,6 +1255,54 @@ class LabBot:
         context.bot.send_photo(chat_id=chat_id, photo=bio, reply_markup=self.reply_markup)
         plt.close()
         logging.info('Graph sent to {}.'.format(chat_id))
+
+    @restricted
+    @send_action(ChatAction.TYPING)
+    def last_command(self, update, context, args=[], chat_id=0, error_str=""):
+        """list all last commands or redo (n-th) last command"""
+        if not args:
+            args = context.args
+        if not args:
+            args = []
+        chat_id = self.get_chat_id(update, chat_id)
+
+        str_out = ""
+        if len(args) and args[0] in ["list", "l"]:
+            len_last = len(self.USER_config[chat_id]["last_commands"])
+            for i, c in enumerate(self.USER_config[chat_id]["last_commands"]):
+                str_out += "*{:d}*: {} {}\n".format(len_last - i, c[0], " ".join(c[1]))
+            if str_out == "":
+                str_out += "_None._"
+            str_out = "*Last commands:*\n" + str_out
+            context.bot.send_message(chat_id=update.effective_message.chat_id, text=str_out,
+                parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
+            logging.info('List of last commands sent to {}.'.format(chat_id))
+            return
+
+        ns = []
+        for arg in args:
+            try:
+                ns.append(int(arg))
+            except ValueError:
+                pass
+        if len(ns) == 0:
+            ns.append(1)
+
+        num_sent = 0
+        logging.info('Sending last {} commands to {}.'.format(ns, chat_id))
+        for n in ns:
+            res = self.get_from_last_commands(chat_id, n)
+            if res is not None:
+                c, c_args = res
+                if c == "status":
+                    self.status_sensors(update, context, args=c_args, chat_id=chat_id, error_str=error_str)
+                    num_sent += 1
+                elif c == "graph":
+                    self.status_graph(update, context, args=c_args, chat_id=chat_id, error_str=error_str)
+                    num_sent += 1
+        if num_sent == 0:
+            context.bot.send_message(chat_id=update.effective_message.chat_id, text="Last commands not found.",
+                parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup)
 
     def read_logs(self, from_date, to_date):
         """reads logs for the days between from_date and to_date.

@@ -40,6 +40,7 @@ DATE_FMT_BOT_SHORT = ("%H:%M:%S")  # use short date format if less than DATE_FMT
 # for longer commands "statusadasf" will be recognized
 MESSAGE_COMMANDS_STRICT_MAXLENGTH = 3
 
+NUM_SAVE_LAST_COMMANDS = 10  # save a history of n commands (only graoh and status commands are saved)
 
 # replace names from the file using these callable
 def replace(x):
