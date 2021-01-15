@@ -39,7 +39,7 @@ import sys
 import threading
 import traceback
 import telegram
-from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler, BaseFilter, Filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler, MessageFilter, Filters
 from telegram import ChatAction
 from collections import deque
 
@@ -154,37 +154,37 @@ class LabBot:
     def setup_handlers(self):
         """sets up the message handlers for the bot"""
 
-        class FilterPressure(BaseFilter):
+        class FilterPressure(MessageFilter):
             def filter(self, message):
                 if not message.text:
                     return False
                 return (('pressure' in message.text.lower()) or ('status' in message.text.lower()))
 
-        class FilterBakeout(BaseFilter):
+        class FilterBakeout(MessageFilter):
             def filter(self, message):
                 if not message.text:
                     return False
                 return 'bakeout' in message.text.lower()
 
-        class FilterPhoto(BaseFilter):
+        class FilterPhoto(MessageFilter):
             def filter(self, message):
                 if not message.text:
                     return False
                 return 'photo' in message.text.lower()
 
-        class FilterHelp(BaseFilter):
+        class FilterHelp(MessageFilter):
             def filter(self, message):
                 if not message.text:
                     return False
                 return (('help' in message.text.lower()) or 'h' == message.text.lower())
 
-        class FilterGraph(BaseFilter):
+        class FilterGraph(MessageFilter):
             def filter(self, message):
                 if not message.text:
                     return False
                 return (('graph' in message.text.lower()) or 'g' == message.text.lower())
 
-        class FilterLast(BaseFilter):
+        class FilterLast(MessageFilter):
             def filter(self, message):
                 if not message.text:
                     return False
