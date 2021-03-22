@@ -525,7 +525,7 @@ class LabBot:
                              date_parser=self.str2date,
                              skiprows=[1],  # 0 are the column headers, 1 is truncated
                              index_col=0,
-                             dtype=np.float,
+                             dtype=float,
                              error_bad_lines=False)
         except pd.errors.EmptyDataError:
             logging.warning('No data found in log file {}.'.format(log_file))
@@ -1338,7 +1338,7 @@ class LabBot:
                                  parse_dates=True,
                                  date_parser=self.str2date,
                                  index_col=0,
-                                 dtype=np.float,
+                                 dtype=float,
                                  error_bad_lines=False)  # TODO: check if ignoring bad lines does not cause any other errors
                 datas.append(df)
             except FileNotFoundError:
@@ -1373,7 +1373,7 @@ class LabBot:
                              date_parser=self.str2date,
                              skiprows=[1],  # 0 are the column headers, 1 is truncated
                              index_col=0,
-                             dtype=np.float,
+                             dtype=float,
                              error_bad_lines=False)
             log_labels = df.columns.tolist()
             log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
