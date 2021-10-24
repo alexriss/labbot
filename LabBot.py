@@ -49,7 +49,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.23
+        self.__version__ = 0.24
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -140,7 +140,7 @@ class LabBot:
             if 'chat_id' not in kwargs.keys():
                 kwargs['chat_id'] = 0
             chat_id = self.get_chat_id(update, kwargs['chat_id'])
-            if update:
+            if hasattr(update, 'effective_user'):
                 user_id = update.effective_user.id
             else:
                 user_id = chat_id
@@ -526,7 +526,7 @@ class LabBot:
                              skiprows=[1],  # 0 are the column headers, 1 is truncated
                              index_col=0,
                              dtype=float,
-                             error_bad_lines=False)
+                             on_bad_lines="skip")
         except pd.errors.EmptyDataError:
             logging.warning('No data found in log file {}.'.format(log_file))
             return None
@@ -1339,7 +1339,7 @@ class LabBot:
                                  date_parser=self.str2date,
                                  index_col=0,
                                  dtype=float,
-                                 error_bad_lines=False)  # TODO: check if ignoring bad lines does not cause any other errors
+                                 on_bad_lines="skip")  # TODO: check if ignoring bad lines does not cause any other errors
                 datas.append(df)
             except FileNotFoundError:
                 pass
@@ -1374,7 +1374,7 @@ class LabBot:
                              skiprows=[1],  # 0 are the column headers, 1 is truncated
                              index_col=0,
                              dtype=float,
-                             error_bad_lines=False)
+                             on_bad_lines="skip")
             log_labels = df.columns.tolist()
             log_labels_nice = list(map(cfg.LOG_NAMES_REPLACEMENT, log_labels))
         except pd.errors.EmptyDataError:
@@ -1605,7 +1605,7 @@ class LabBot:
                                 entity, chat_id,
                                 self.replace_lowerthan(value).values[0])
                             )
-                            self.measure_send_result(self.bot, update=None, args=[str_out], chat_id=chat_id)
+                            self.measure_send_result(self.bot, None, args=[str_out], chat_id=chat_id)
                         continue
                     else:
                         logging.info(
@@ -1616,7 +1616,7 @@ class LabBot:
                 str_out = "Request to measure *{}* timed out.".format(entity)
                 for chat_id in m_dict['chat_ids']:
                     logging.info("Measure request ({}) by {} timed out.".format(entity, chat_id))
-                    self.measure_send_result(self.bot, update=None, args=[str_out], chat_id=chat_id)
+                    self.measure_send_result(self.bot, None, args=[str_out], chat_id=chat_id)
 
     def check_logging_file(self, force=False):
         """checks whether the filehandle for logging should be updated"""
