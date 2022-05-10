@@ -49,7 +49,7 @@ import LabBot_config as cfg
 
 class LabBot:
     def __init__(self):
-        self.__version__ = 0.24
+        self.__version__ = 0.25
 
         self.LOG_last_checked = None     # date and time of when the log was last checked
         self.LOG_data = {}               # data of one log line, keys are labels
@@ -510,7 +510,7 @@ class LabBot:
             parse_mode=telegram.ParseMode.MARKDOWN, reply_markup=self.reply_markup
         )
 
-    def measure_getlast(self, entity):
+    def measure_getlast(self, entity, num=1):
         """reads last log entries for a specific measure entity"""
         now = datetime.datetime.now()
         log_file = now.strftime(cfg.MEASURE_REQUESTS[entity]['log_file'])
@@ -530,7 +530,7 @@ class LabBot:
         except pd.errors.EmptyDataError:
             logging.warning('No data found in log file {}.'.format(log_file))
             return None
-        return df[-1:]
+        return df[-num:]
 
     @restricted
     @send_action(ChatAction.TYPING)
@@ -932,7 +932,7 @@ class LabBot:
                 # check the message requests - here we need to read the log file
                 for entity, cm_dict in cfg.MEASURE_REQUESTS.items():
                     if c == cm_dict['column']:
-                        data = self.measure_getlast(entity)
+                        data = self.measure_getlast(entity, 2)
                         if data is not None and data.shape[0] > 0:
                             date_last_measured = data.tail(1).index.to_pydatetime()[0]
                             # if date_last_measured <= m_dict['last_measured']:
@@ -950,6 +950,16 @@ class LabBot:
                                 self.replace_lowerthan(value).values[0],
                                 self.date_format_bot(date_last_measured)
                             )
+                            # change since last measured
+                            if len(gradient_dates) > 0 and len(data) > 1:
+                                value1 = data.iloc[-1][column_name]
+                                value2 = data.iloc[-2][column_name]
+                                if value1 >= 0 and value2 >=0:
+                                    value_diff = value2 - value1
+                                    hours_diff = (data.index[-1] - data.index[-2]).total_seconds() / 3600
+                                    if hours_diff > 0:
+                                        str_out += "      _slope: {:.{prec}g} h⁻¹ _".format(value_diff / hours_diff, prec=cfg.FLOAT_PRECISION_BOT_GRADIENT)
+
 
         self.bot.send_message(chat_id=chat_id, text=str_out, parse_mode=telegram.ParseMode.MARKDOWN,
                          reply_markup=self.reply_markup)
